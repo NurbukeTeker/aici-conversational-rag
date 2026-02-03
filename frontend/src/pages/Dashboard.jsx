@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
-import { sessionApi, qaApi, ApiError } from '../services/api';
+import { sessionApi, qaApi, exportApi, ApiError } from '../services/api';
 
 // Sample drawing objects from the specification
 const SAMPLE_OBJECTS = [
@@ -26,6 +26,11 @@ function Dashboard() {
   const [question, setQuestion] = useState('');
   const [messages, setMessages] = useState([]);
   const [asking, setAsking] = useState(false);
+  
+  // Export state
+  const [exportingExcel, setExportingExcel] = useState(false);
+  const [exportingJson, setExportingJson] = useState(false);
+  const [exportMessage, setExportMessage] = useState(null);
 
   // Load session objects on mount
   useEffect(() => {
@@ -121,6 +126,107 @@ function Dashboard() {
     }
   };
 
+  // Prepare dialogues for export
+  const prepareDialoguesForExport = () => {
+    return messages.map(msg => ({
+      question: msg.question,
+      answer: msg.answer,
+      evidence: msg.evidence || null,
+      timestamp: new Date(msg.id).toISOString()
+    }));
+  };
+
+  // Get session summary for export
+  const getSessionSummary = () => {
+    try {
+      const objects = JSON.parse(jsonText);
+      if (!Array.isArray(objects)) return null;
+      
+      const layerSummary = {};
+      objects.forEach(obj => {
+        const layer = obj.layer || 'Unknown';
+        layerSummary[layer] = (layerSummary[layer] || 0) + 1;
+      });
+      
+      return {
+        object_count: objects.length,
+        layer_summary: layerSummary
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  // Handle Excel download
+  const handleDownloadExcel = async () => {
+    if (messages.length === 0) return;
+    
+    setExportingExcel(true);
+    setExportMessage(null);
+    
+    try {
+      const dialogues = prepareDialoguesForExport();
+      const sessionSummary = getSessionSummary();
+      
+      const blob = await exportApi.downloadExcel(dialogues, sessionSummary);
+      
+      // Create download link
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `AICI_QA_Export_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      
+      setExportMessage({ type: 'success', text: 'Excel downloaded!' });
+    } catch (err) {
+      setExportMessage({ 
+        type: 'error', 
+        text: err instanceof ApiError ? err.message : 'Download failed'
+      });
+    } finally {
+      setExportingExcel(false);
+      setTimeout(() => setExportMessage(null), 3000);
+    }
+  };
+
+  // Handle JSON download
+  const handleDownloadJson = async () => {
+    if (messages.length === 0) return;
+    
+    setExportingJson(true);
+    setExportMessage(null);
+    
+    try {
+      const dialogues = prepareDialoguesForExport();
+      const sessionSummary = getSessionSummary();
+      
+      const blob = await exportApi.downloadJson(dialogues, sessionSummary);
+      
+      // Create download link
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `AICI_QA_Export_${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      
+      setExportMessage({ type: 'success', text: 'JSON downloaded!' });
+    } catch (err) {
+      setExportMessage({ 
+        type: 'error', 
+        text: err instanceof ApiError ? err.message : 'Download failed'
+      });
+    } finally {
+      setExportingJson(false);
+      setTimeout(() => setExportMessage(null), 3000);
+    }
+  };
+
   return (
     <>
       <header className="header">
@@ -212,6 +318,46 @@ function Dashboard() {
               </svg>
               Q&A
             </div>
+            
+            {/* Export Buttons */}
+            {messages.length > 0 && (
+              <div className="export-buttons">
+                <button
+                  className="btn-icon"
+                  onClick={handleDownloadExcel}
+                  disabled={exportingExcel}
+                  title="Download as Excel"
+                >
+                  {exportingExcel ? (
+                    <span className="spinner-small" />
+                  ) : (
+                    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                  )}
+                </button>
+                <button
+                  className="btn-icon"
+                  onClick={handleDownloadJson}
+                  disabled={exportingJson}
+                  title="Download as JSON"
+                >
+                  {exportingJson ? (
+                    <span className="spinner-small" />
+                  ) : (
+                    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
+                  )}
+                </button>
+                
+                {exportMessage && (
+                  <span className={`export-message ${exportMessage.type}`}>
+                    {exportMessage.text}
+                  </span>
+                )}
+              </div>
+            )}
           </div>
           
           <div className="panel-body qa-panel">

@@ -109,4 +109,71 @@ export const healthApi = {
   check: () => request('/health'),
 };
 
+// Export API
+export const exportApi = {
+  /**
+   * Download dialogues as Excel file
+   * @param {Array} dialogues - Array of {question, answer, evidence, timestamp}
+   * @param {Object} sessionSummary - Optional session context
+   * @returns {Promise<Blob>} Excel file blob
+   */
+  downloadExcel: async (dialogues, sessionSummary = null) => {
+    const token = localStorage.getItem('token');
+    
+    const response = await fetch(`${API_BASE}/export/excel`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token && { Authorization: `Bearer ${token}` }),
+      },
+      body: JSON.stringify({ dialogues, session_summary: sessionSummary }),
+    });
+    
+    if (!response.ok) {
+      let message = 'Export failed';
+      try {
+        const error = await response.json();
+        message = error.detail || message;
+      } catch {
+        message = response.statusText;
+      }
+      throw new ApiError(message, response.status);
+    }
+    
+    return response.blob();
+  },
+  
+  /**
+   * Download dialogues as JSON file
+   * @param {Array} dialogues - Array of {question, answer, evidence, timestamp}
+   * @param {Object} sessionSummary - Optional session context
+   * @returns {Promise<Blob>} JSON file blob
+   */
+  downloadJson: async (dialogues, sessionSummary = null) => {
+    const token = localStorage.getItem('token');
+    
+    const response = await fetch(`${API_BASE}/export/json`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token && { Authorization: `Bearer ${token}` }),
+      },
+      body: JSON.stringify({ dialogues, session_summary: sessionSummary }),
+    });
+    
+    if (!response.ok) {
+      let message = 'Export failed';
+      try {
+        const error = await response.json();
+        message = error.detail || message;
+      } catch {
+        message = response.statusText;
+      }
+      throw new ApiError(message, response.status);
+    }
+    
+    return response.blob();
+  },
+};
+
 export { ApiError };

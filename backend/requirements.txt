@@ -14,6 +14,9 @@ python-multipart>=0.0.18
 sqlalchemy>=2.0.0
 aiosqlite>=0.20.0
 
+# Excel Export
+openpyxl>=3.1.0
+
 # Testing
 pytest>=8.3.0
 pytest-asyncio>=0.24.0
