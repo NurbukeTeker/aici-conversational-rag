@@ -9,6 +9,16 @@ A hybrid Retrieval-Augmented Generation system that combines **persistent knowle
 3. **Hybrid Answers**: Questions are answered by retrieving relevant PDF rules AND reasoning over the current JSON state
 4. **Multi-User Isolation**: Each user has their own session; same question + different JSON = different answer
 
+## Mapping to Challenge Requirements
+
+| Challenge Requirement | Implementation |
+|----------------------|----------------|
+| Persistent knowledge | PDF embeddings stored in ChromaDB (fixed, global) |
+| Ephemeral state | User-scoped JSON in Redis (per session, not embedded) |
+| Hybrid reasoning | Agent prompt combines retrieved chunks + current JSON |
+| Multi-user sessions | JWT authentication + Redis keys scoped by user_id |
+| Modular system | Frontend + Backend + Agent as separate services |
+
 ## Architecture
 
 ```
@@ -68,6 +78,8 @@ docker-compose up --build
    - Backend API Docs: http://localhost:8000/docs
    - Agent API Docs: http://localhost:8001/docs
 
+> **Note on PDF Ingestion:** PDF ingestion runs automatically on agent startup if the vector store is empty. The `/ingest` endpoint is provided for manual re-indexing during development.
+
 ## Example Queries
 
 Try these questions with the sample JSON (pre-filled in the frontend):
@@ -79,6 +91,24 @@ Try these questions with the sample JSON (pre-filled in the frontend):
 | "Can I build an extension beyond the rear wall?" | Combines PDF rules with `Walls` layer analysis |
 | "What permitted development rights apply to this plot?" | Uses `Plot Boundary` + PDF Class rules |
 | "Is a planning application required for a new door?" | Checks `Doors` layer + PDF conditions |
+
+### Example: What the Agent Sees
+
+When you ask "Does this property front a highway?", the agent receives:
+
+```
+Question: "Does this property front a highway?"
+
+Session JSON layers: Highway (2), Plot Boundary (1), Walls (2), Doors (1), Windows (1)
+
+Retrieved document excerpt:
+[DOC: permitted_development.pdf | p6 | chunk: general_issues_highway]
+"Highway" - is a public right of way such as a public road, public footpath 
+and bridleway. For the purposes of the Order it also includes unadopted 
+streets or private ways.
+
+→ Agent reasons: JSON contains "Highway" layer → property fronts a highway
+```
 
 ## API Endpoints
 
@@ -98,8 +128,18 @@ Try these questions with the sample JSON (pre-filled in the frontend):
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/answer` | Process question with hybrid RAG |
-| POST | `/ingest` | Manually trigger PDF ingestion |
+| POST | `/ingest` | Manually trigger PDF re-ingestion |
 | GET | `/health` | Health check (includes vector store status) |
+
+## Security Considerations
+
+| Aspect | Implementation |
+|--------|----------------|
+| Authentication | JWT tokens with configurable expiry (default: 60 min) |
+| Token refresh | Not implemented (out of scope for challenge) |
+| User isolation | Redis keys scoped by `session:{user_id}:objects` |
+| Secrets | Stored in `.env` file (git-ignored) |
+| CORS | Configured for frontend origin |
 
 ## Design Decisions
 
@@ -124,6 +164,10 @@ Simple HTTP REST, no streaming:
 - Challenge requirements are request/response Q&A
 - Simpler to implement, test, debug
 - Lower infrastructure complexity
+
+### Performance Optimization
+
+To reduce token usage, a lightweight session summary (layer counts, presence flags) is computed on JSON update and included in prompts. This avoids sending the full JSON for simple presence checks.
 
 ## Project Structure
 
@@ -176,7 +220,7 @@ Simple HTTP REST, no streaming:
 - Use the sample JSON as a starting point
 
 ### "Incorrect username or password"
-- Users are stored in memory (reset on container restart)
+- User credentials are stored in-memory for simplicity (challenge scope). In production, this would be replaced by a persistent database.
 - Register a new user after container restart
 
 ### CORS errors
