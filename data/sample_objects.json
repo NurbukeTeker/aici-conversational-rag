@@ -1,0 +1,64 @@
+[
+  {
+    "layer": "Highway",
+    "type": "line",
+    "properties": {
+      "name": "Main Road",
+      "width": 6,
+      "classification": "public_highway"
+    }
+  },
+  {
+    "layer": "Highway",
+    "type": "line",
+    "properties": {
+      "name": "Side Street",
+      "width": 4,
+      "classification": "public_highway"
+    }
+  },
+  {
+    "layer": "Plot Boundary",
+    "type": "polygon",
+    "properties": {
+      "area": 450,
+      "unit": "sqm"
+    }
+  },
+  {
+    "layer": "Walls",
+    "type": "line",
+    "properties": {
+      "material": "brick",
+      "height": 2.4,
+      "elevation": "principal"
+    }
+  },
+  {
+    "layer": "Walls",
+    "type": "line",
+    "properties": {
+      "material": "brick",
+      "height": 2.4,
+      "elevation": "rear"
+    }
+  },
+  {
+    "layer": "Doors",
+    "type": "point",
+    "properties": {
+      "width": 0.9,
+      "type": "entrance",
+      "elevation": "principal"
+    }
+  },
+  {
+    "layer": "Windows",
+    "type": "point",
+    "properties": {
+      "width": 1.2,
+      "height": 1.0,
+      "elevation": "principal"
+    }
+  }
+]
