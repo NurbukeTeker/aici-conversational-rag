@@ -19,10 +19,8 @@ from .models import (
     SessionObjects, SessionObjectsResponse,
     QARequest, QAResponse,
     HealthResponse, PasswordStrengthResponse, AvailabilityResponse,
-    ValidationErrorDetail, ValidationErrorResponse,
-    ErrorResponse, ErrorDetail,
-    MAX_PAYLOAD_SIZE_KB, MAX_OBJECTS_COUNT, EXAMPLE_DRAWING_OBJECTS,
-    format_validation_errors
+    ErrorResponse,
+    MAX_PAYLOAD_SIZE_KB, MAX_OBJECTS_COUNT, EXAMPLE_DRAWING_OBJECTS
 )
 from .auth import create_access_token, get_current_user, TokenData
 from .session import get_session_service, SessionService
@@ -80,19 +78,6 @@ async def json_decode_exception_handler(request: Request, exc: json.JSONDecodeEr
                 "type": "json_invalid"
             }],
             "example": EXAMPLE_DRAWING_OBJECTS
-        }
-    )
-
-
-async def generic_exception_handler(request: Request, exc: Exception):
-    """Handle unexpected errors."""
-    logger.exception(f"Unexpected error: {exc}")
-    return JSONResponse(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={
-            "error": "INTERNAL_ERROR",
-            "message": "An unexpected error occurred. Please try again later.",
-            "details": []
         }
     )
 

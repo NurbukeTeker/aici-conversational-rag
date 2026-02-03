@@ -1,10 +1,6 @@
 """Pydantic models for Backend service."""
-from pydantic import (
-    BaseModel, Field, EmailStr, field_validator, model_validator,
-    ConfigDict, ValidationError
-)
-from typing import Any, Literal, Annotated, Union
-from enum import Enum
+from pydantic import BaseModel, Field, EmailStr, field_validator, ConfigDict
+from typing import Any
 import re
 
 
@@ -14,7 +10,6 @@ import re
 MAX_OBJECTS_COUNT = 1000
 MAX_PAYLOAD_SIZE_KB = 512  # 512 KB max payload
 MAX_STRING_LENGTH = 500
-MAX_COORDINATES_PER_OBJECT = 10000
 MAX_NESTING_DEPTH = 5
 
 
@@ -150,152 +145,7 @@ class AvailabilityResponse(BaseModel):
     message: str | None = None
 
 
-class ValidationErrorDetail(BaseModel):
-    """Detailed validation error."""
-    field: str
-    message: str
-    code: str | None = None
-
-
-class ValidationErrorResponse(BaseModel):
-    """Validation error response with details."""
-    detail: str
-    errors: list[ValidationErrorDetail] = Field(default_factory=list)
-
-
 # ============== Drawing Object Schema ==============
-
-class ObjectType(str, Enum):
-    """Valid drawing object types."""
-    LINE = "LINE"
-    POLYLINE = "POLYLINE"
-    POLYGON = "POLYGON"
-    POINT = "POINT"
-    CIRCLE = "CIRCLE"
-    ARC = "ARC"
-    TEXT = "TEXT"
-    BLOCK = "BLOCK"
-    # Lowercase variants for flexibility
-    line = "line"
-    polyline = "polyline"
-    polygon = "polygon"
-    point = "point"
-    circle = "circle"
-    arc = "arc"
-    text = "text"
-    block = "block"
-
-
-class Coordinate(BaseModel):
-    """A 2D or 3D coordinate point."""
-    x: float = Field(..., description="X coordinate")
-    y: float = Field(..., description="Y coordinate")
-    z: float | None = Field(None, description="Z coordinate (optional)")
-
-    @field_validator('x', 'y', 'z')
-    @classmethod
-    def validate_coordinate(cls, v):
-        if v is not None and (v < -1e10 or v > 1e10):
-            raise ValueError('Coordinate value out of reasonable range')
-        return v
-
-
-class LineGeometry(BaseModel):
-    """Geometry for LINE type objects."""
-    start: list[float] | Coordinate = Field(..., description="Start point [x, y] or {x, y}")
-    end: list[float] | Coordinate = Field(..., description="End point [x, y] or {x, y}")
-
-    @field_validator('start', 'end')
-    @classmethod
-    def validate_point(cls, v):
-        if isinstance(v, list):
-            if len(v) < 2 or len(v) > 3:
-                raise ValueError('Point must have 2 or 3 coordinates [x, y] or [x, y, z]')
-            for coord in v:
-                if not isinstance(coord, (int, float)):
-                    raise ValueError('Coordinates must be numbers')
-        return v
-
-
-class PolylineGeometry(BaseModel):
-    """Geometry for POLYLINE type objects."""
-    points: list[list[float] | Coordinate] = Field(
-        ..., 
-        min_length=2,
-        description="List of points forming the polyline"
-    )
-
-    @field_validator('points')
-    @classmethod
-    def validate_points(cls, v):
-        if len(v) > MAX_COORDINATES_PER_OBJECT:
-            raise ValueError(f'Too many points (max {MAX_COORDINATES_PER_OBJECT})')
-        for i, point in enumerate(v):
-            if isinstance(point, list):
-                if len(point) < 2 or len(point) > 3:
-                    raise ValueError(f'Point at index {i} must have 2 or 3 coordinates')
-        return v
-
-
-class PolygonGeometry(BaseModel):
-    """Geometry for POLYGON type objects."""
-    points: list[list[float] | Coordinate] = Field(
-        ..., 
-        min_length=3,
-        description="List of points forming the polygon (min 3)"
-    )
-    
-    @field_validator('points')
-    @classmethod
-    def validate_points(cls, v):
-        if len(v) > MAX_COORDINATES_PER_OBJECT:
-            raise ValueError(f'Too many points (max {MAX_COORDINATES_PER_OBJECT})')
-        return v
-
-
-class PointGeometry(BaseModel):
-    """Geometry for POINT type objects."""
-    position: list[float] | Coordinate = Field(..., description="Point position [x, y] or {x, y}")
-
-
-class CircleGeometry(BaseModel):
-    """Geometry for CIRCLE type objects."""
-    center: list[float] | Coordinate = Field(..., description="Center point")
-    radius: float = Field(..., gt=0, description="Circle radius")
-
-
-class ArcGeometry(BaseModel):
-    """Geometry for ARC type objects."""
-    center: list[float] | Coordinate = Field(..., description="Arc center")
-    radius: float = Field(..., gt=0, description="Arc radius")
-    start_angle: float = Field(..., description="Start angle in degrees")
-    end_angle: float = Field(..., description="End angle in degrees")
-
-
-class TextGeometry(BaseModel):
-    """Geometry for TEXT type objects."""
-    position: list[float] | Coordinate = Field(..., description="Text insertion point")
-    content: str = Field(..., max_length=MAX_STRING_LENGTH, description="Text content")
-    height: float | None = Field(None, gt=0, description="Text height")
-    rotation: float | None = Field(None, description="Rotation angle in degrees")
-
-
-class ObjectProperties(BaseModel):
-    """Common properties for drawing objects."""
-    name: str | None = Field(None, max_length=MAX_STRING_LENGTH)
-    color: str | int | None = None
-    line_type: str | None = Field(None, alias="lineType")
-    line_weight: float | None = Field(None, alias="lineWeight")
-    material: str | None = Field(None, max_length=MAX_STRING_LENGTH)
-    height: float | None = None
-    width: float | None = None
-    area: float | None = None
-    length: float | None = None
-    elevation: str | None = None
-    classification: str | None = None
-    
-    model_config = ConfigDict(extra='allow', populate_by_name=True)
-
 
 class DrawingObject(BaseModel):
     """
@@ -398,14 +248,6 @@ class SessionObjects(BaseModel):
         max_length=MAX_OBJECTS_COUNT,
         description="List of drawing objects with type, layer, geometry, and properties"
     )
-
-    @model_validator(mode='after')
-    def validate_objects_count(self):
-        if len(self.objects) > MAX_OBJECTS_COUNT:
-            raise ValueError(
-                f'Too many objects ({len(self.objects)}). Maximum allowed: {MAX_OBJECTS_COUNT}'
-            )
-        return self
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -521,21 +363,3 @@ EXAMPLE_DRAWING_OBJECTS = {
         }
     ]
 }
-
-
-def format_validation_errors(exc: ValidationError) -> ErrorResponse:
-    """Convert Pydantic ValidationError to standardized ErrorResponse."""
-    details = []
-    for error in exc.errors():
-        details.append(ErrorDetail(
-            loc=list(error.get('loc', [])),
-            msg=error.get('msg', 'Validation error'),
-            type=error.get('type', 'value_error')
-        ))
-    
-    return ErrorResponse(
-        error="VALIDATION_ERROR",
-        message="Invalid drawing objects. Please check the format and try again.",
-        details=details,
-        example=EXAMPLE_DRAWING_OBJECTS
-    )
