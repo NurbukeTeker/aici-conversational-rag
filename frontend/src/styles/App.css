@@ -1,8 +1,10 @@
 /* App Layout */
 .app {
-  min-height: 100vh;
+  height: 100vh;
+  max-height: 100vh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .loading-screen {
@@ -118,11 +120,15 @@
   max-width: 1600px;
   margin: 0 auto;
   width: 100%;
+  height: calc(100vh - 80px); /* Fixed height = viewport - header */
+  min-height: 0; /* Important for flex children to shrink */
 }
 
 @media (max-width: 1024px) {
   .main-content {
     grid-template-columns: 1fr;
+    height: auto;
+    min-height: calc(100vh - 80px);
   }
 }
 
@@ -135,6 +141,9 @@
   flex-direction: column;
   overflow: hidden;
   transition: background-color var(--transition-base), border-color var(--transition-base);
+  height: 100%; /* Fill grid cell */
+  max-height: 100%; /* Don't exceed grid cell */
+  min-height: 0; /* Allow shrinking */
 }
 
 .panel-header {
@@ -167,7 +176,8 @@
 .panel-body {
   flex: 1;
   padding: 1.25rem;
-  overflow-y: auto;
+  overflow: hidden; /* Let children handle their own scroll */
+  min-height: 0; /* Critical for flex child scrolling */
 }
 
 .panel-footer {
@@ -182,11 +192,13 @@
   height: 100%;
   display: flex;
   flex-direction: column;
+  min-height: 0; /* Allow shrinking for scroll */
+  overflow: hidden; /* Contain the textarea */
 }
 
 .json-textarea {
   flex: 1;
-  min-height: 300px;
+  min-height: 0; /* Allow shrinking */
   font-family: var(--font-mono);
   font-size: 0.8125rem;
   line-height: 1.6;
@@ -195,6 +207,7 @@
   border-radius: var(--radius-md);
   padding: 1rem;
   resize: none;
+  overflow-y: auto; /* Enable scroll */
   transition: background-color var(--transition-base), border-color var(--transition-base);
 }
 
@@ -225,12 +238,15 @@
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-height: 0; /* Allow shrinking for scroll */
+  overflow: hidden; /* Contain the messages */
 }
 
 .qa-messages {
   flex: 1;
   overflow-y: auto;
   padding-bottom: 1rem;
+  min-height: 0; /* Critical for flex child scrolling */
 }
 
 .qa-empty {
