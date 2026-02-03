@@ -9,7 +9,7 @@ import httpx
 from fastapi import FastAPI, HTTPException, Depends, status, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.exceptions import RequestValidationError
 from sqlalchemy.orm import Session
 
@@ -19,7 +19,7 @@ from .models import (
     SessionObjects, SessionObjectsResponse,
     QARequest, QAResponse,
     HealthResponse, PasswordStrengthResponse, AvailabilityResponse,
-    ErrorResponse,
+    ErrorResponse, ExportRequest,
     MAX_PAYLOAD_SIZE_KB, MAX_OBJECTS_COUNT, EXAMPLE_DRAWING_OBJECTS
 )
 from .auth import create_access_token, get_current_user, TokenData
@@ -30,6 +30,7 @@ from .user_service import (
     UserAlreadyExistsError, ValidationError as UserValidationError
 )
 from .validators import password_validator
+from .export_service import get_export_service
 
 # Configure logging
 logging.basicConfig(
@@ -564,6 +565,96 @@ async def health_check(
     )
 
 
+# ============== Export Endpoints ==============
+
+@app.post("/export/excel")
+async def download_dialogue_excel(
+    data: ExportRequest,
+    current_user: Annotated[TokenData, Depends(get_current_user)]
+):
+    """
+    Download Q&A dialogues as Excel file.
+    
+    Returns an Excel file (.xlsx) with all dialogues and evidence.
+    """
+    if not current_user.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid user session"
+        )
+    
+    export_service = get_export_service()
+    
+    # Convert dialogues to dict format
+    dialogues = [d.model_dump() for d in data.dialogues]
+    
+    # Generate Excel
+    excel_bytes = export_service.create_dialogue_excel(
+        dialogues=dialogues,
+        username=current_user.username or "user",
+        session_summary=data.session_summary
+    )
+    
+    # Generate filename
+    from datetime import datetime
+    filename = f"AICI_QA_Export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    
+    logger.info(f"User {current_user.user_id} downloaded Excel export with {len(dialogues)} items")
+    
+    return Response(
+        content=excel_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}"
+        }
+    )
+
+
+@app.post("/export/json")
+async def download_dialogue_json(
+    data: ExportRequest,
+    current_user: Annotated[TokenData, Depends(get_current_user)]
+):
+    """
+    Download Q&A dialogues as JSON file.
+    
+    Returns a JSON file with all dialogues and evidence.
+    """
+    if not current_user.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid user session"
+        )
+    
+    # Convert dialogues to dict format
+    dialogues = [d.model_dump() for d in data.dialogues]
+    
+    # Build export data
+    from datetime import datetime
+    export_data = {
+        "export_info": {
+            "exported_at": datetime.now().isoformat(),
+            "exported_by": current_user.username or "user",
+            "total_dialogues": len(dialogues)
+        },
+        "session_summary": data.session_summary,
+        "dialogues": dialogues
+    }
+    
+    # Generate filename
+    filename = f"AICI_QA_Export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    
+    logger.info(f"User {current_user.user_id} downloaded JSON export with {len(dialogues)} items")
+    
+    return Response(
+        content=json.dumps(export_data, indent=2, ensure_ascii=False),
+        media_type="application/json",
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}"
+        }
+    )
+
+
 @app.get("/")
 async def root():
     """Root endpoint."""
@@ -580,6 +671,8 @@ async def root():
             "/auth/check-password",
             "/session/objects",
             "/qa",
+            "/export/excel",
+            "/export/json",
             "/health"
         ],
         "limits": {

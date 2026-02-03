@@ -339,6 +339,22 @@ class HealthResponse(BaseModel):
     agent_available: bool
 
 
+# ============== Export Models ==============
+
+class DialogueItem(BaseModel):
+    """Single Q&A dialogue item for export."""
+    question: str
+    answer: str
+    evidence: Evidence | None = None
+    timestamp: str | None = None
+
+
+class ExportRequest(BaseModel):
+    """Request to export dialogues."""
+    dialogues: list[DialogueItem] = Field(..., min_length=1, description="List of Q&A dialogues to export")
+    session_summary: dict | None = Field(None, description="Optional session context")
+
+
 # ============== Validation Helpers ==============
 
 EXAMPLE_DRAWING_OBJECTS = {
