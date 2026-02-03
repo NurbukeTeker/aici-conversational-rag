@@ -47,7 +47,11 @@ class VectorStoreService:
         
         ids = [chunk["id"] for chunk in chunks]
         documents = [chunk["text"] for chunk in chunks]
-        metadatas = [chunk["metadata"] for chunk in chunks]
+        # ChromaDB doesn't accept None values in metadata - filter them out
+        metadatas = [
+            {k: v for k, v in chunk["metadata"].items() if v is not None}
+            for chunk in chunks
+        ]
         
         # Add in batches to avoid memory issues
         batch_size = 100

@@ -93,15 +93,20 @@ class PDFIngestionService:
                 # Create unique chunk ID
                 chunk_id = f"{source.replace('.pdf', '')}_{page_num:03d}_{chunk_counter:04d}"
                 
+                # Build metadata - ChromaDB doesn't accept None values
+                metadata = {
+                    "source": source,
+                    "page": str(page_num),
+                    "chunk_index": chunk_counter
+                }
+                # Only add section if it's not None
+                if section is not None:
+                    metadata["section"] = section
+                
                 yield {
                     "id": chunk_id,
                     "text": chunk_text,
-                    "metadata": {
-                        "source": source,
-                        "page": str(page_num),
-                        "section": section,
-                        "chunk_index": chunk_counter
-                    }
+                    "metadata": metadata
                 }
     
     def ingest_all(self) -> tuple[int, int]:

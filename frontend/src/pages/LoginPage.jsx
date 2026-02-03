@@ -303,15 +303,26 @@ function LoginPage() {
                   name="username"
                   value={formData.username}
                   onChange={handleChange}
-                  placeholder={mode === 'login' ? 'Enter username or email' : 'Choose a username'}
+                  placeholder={mode === 'login' ? 'Enter username or email' : 'e.g. john_doe123'}
                   required
                   autoComplete="username"
-                  className={mode === 'register' && validation.username.available === false ? 'input-error' : ''}
+                  className={mode === 'register' && (validation.username.available === false || (formData.username && !/^[a-zA-Z][a-zA-Z0-9_]*$/.test(formData.username))) ? 'input-error' : ''}
                 />
                 {mode === 'register' && renderFieldStatus('username')}
               </div>
-              {mode === 'register' && formData.username && formData.username.length < 3 && (
+              {mode === 'register' && formData.username && !/^[a-zA-Z][a-zA-Z0-9_]*$/.test(formData.username) && (
+                <div className="validation-error" style={{ marginTop: '0.5rem' }}>
+                  <svg className="validation-icon" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                  </svg>
+                  <span>Username must start with a letter and contain only letters, numbers, and underscores</span>
+                </div>
+              )}
+              {mode === 'register' && formData.username && /^[a-zA-Z][a-zA-Z0-9_]*$/.test(formData.username) && formData.username.length < 3 && (
                 <div className="field-hint">Username must be at least 3 characters</div>
+              )}
+              {mode === 'register' && !formData.username && (
+                <div className="field-hint">Not your email! Choose a unique username (e.g. john_doe)</div>
               )}
             </div>
 
@@ -325,13 +336,32 @@ function LoginPage() {
                     name="email"
                     value={formData.email}
                     onChange={handleChange}
-                    placeholder="Enter your email"
+                    placeholder="e.g. you@example.com"
                     required
                     autoComplete="email"
-                    className={validation.email.available === false ? 'input-error' : ''}
+                    className={validation.email.available === false || (formData.email && !formData.email.includes('@')) ? 'input-error' : ''}
                   />
                   {renderFieldStatus('email')}
                 </div>
+                {formData.email && !formData.email.includes('@') && (
+                  <div className="validation-error" style={{ marginTop: '0.5rem' }}>
+                    <svg className="validation-icon" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                    </svg>
+                    <span>Please enter a valid email address</span>
+                  </div>
+                )}
+                {validation.email.available === false && (
+                  <div className="validation-error" style={{ marginTop: '0.5rem' }}>
+                    <svg className="validation-icon" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                    </svg>
+                    <span>{validation.email.message || 'This email is already registered'}</span>
+                  </div>
+                )}
+                {!formData.email && (
+                  <div className="field-hint">We'll never share your email with anyone</div>
+                )}
               </div>
             )}
 
@@ -344,9 +374,10 @@ function LoginPage() {
                   name="password"
                   value={formData.password}
                   onChange={handleChange}
-                  placeholder={mode === 'register' ? 'Create a strong password' : 'Enter password'}
+                  placeholder={mode === 'register' ? 'Min 8 chars with A-Z, a-z, 0-9, !@#' : 'Enter password'}
                   required
                   autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
+                  className={mode === 'register' && validation.password.errors?.length > 0 ? 'input-error' : ''}
                 />
                 <button
                   type="button"
@@ -378,6 +409,9 @@ function LoginPage() {
                     warnings={validation.password.warnings}
                   />
                 </>
+              )}
+              {mode === 'register' && !formData.password && (
+                <div className="field-hint">Use uppercase, lowercase, numbers, and special characters</div>
               )}
             </div>
 
@@ -431,6 +465,9 @@ function LoginPage() {
                     <span>Passwords match</span>
                   </div>
                 )}
+                {!formData.confirmPassword && (
+                  <div className="field-hint">Re-enter your password to confirm</div>
+                )}
               </div>
             )}
 
@@ -441,7 +478,14 @@ function LoginPage() {
                 validation.username.available === false ||
                 validation.email.available === false ||
                 (validation.password.errors?.length > 0) ||
-                formData.password !== formData.confirmPassword
+                formData.password !== formData.confirmPassword ||
+                !formData.username ||
+                !/^[a-zA-Z][a-zA-Z0-9_]*$/.test(formData.username) ||
+                formData.username.length < 3 ||
+                !formData.email ||
+                !formData.email.includes('@') ||
+                !formData.password ||
+                !formData.confirmPassword
               ))}
             >
               {loading ? (
