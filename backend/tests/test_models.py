@@ -2,6 +2,9 @@
 import pytest
 from app.models import UserRegister, SessionObjects, QARequest
 
+# Test fixture - NOT a real credential  # noqa: S105  # gitguardian: ignore
+TEST_PASSWORD = "testpass123"  # noqa: S105  # gitguardian: ignore
+
 
 class TestUserModels:
     """Test user-related models."""
@@ -11,7 +14,7 @@ class TestUserModels:
         user = UserRegister(
             username="testuser",
             email="test@example.com",
-            password="password123"
+            password=TEST_PASSWORD
         )
         
         assert user.username == "testuser"
@@ -23,7 +26,7 @@ class TestUserModels:
             UserRegister(
                 username="ab",  # Too short (min 3)
                 email="test@example.com",
-                password="password123"
+                password=TEST_PASSWORD
             )
     
     def test_user_register_short_password(self):
@@ -32,7 +35,7 @@ class TestUserModels:
             UserRegister(
                 username="testuser",
                 email="test@example.com",
-                password="12345"  # Too short (min 6)
+                password="12345"  # noqa: S105 - intentionally short for test
             )
 
 

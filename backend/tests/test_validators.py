@@ -6,13 +6,23 @@ from app.validators import (
     validate_registration
 )
 
+# =============================================================================
+# TEST FIXTURES - These are NOT real credentials
+# These strings are intentionally crafted to test password validation logic
+# =============================================================================
+# fmt: off
+VALID_TEST_PASSWORD = "TestPass_123!"  # noqa: S105  # gitguardian: ignore
+STRONG_TEST_PASSWORD = "Str0ng_T3st_Pass!"  # noqa: S105  # gitguardian: ignore
+COMMON_TEST_PASSWORD = "Password123!"  # noqa: S105  # gitguardian: ignore
+# fmt: on
+
 
 class TestPasswordValidator:
     """Test password validation."""
     
     def test_valid_strong_password(self):
         """Test that a strong password passes validation."""
-        result = password_validator.validate("SecureP@ss123")
+        result = password_validator.validate(VALID_TEST_PASSWORD)
         assert result.is_valid is True
         assert len(result.errors) == 0
     
@@ -48,18 +58,18 @@ class TestPasswordValidator:
     
     def test_common_password_rejected(self):
         """Test that common passwords are rejected."""
-        result = password_validator.validate("Password123!")
+        result = password_validator.validate(COMMON_TEST_PASSWORD)
         assert result.is_valid is False
         assert any("too common" in e for e in result.errors)
     
     def test_password_strength_scoring(self):
         """Test password strength scoring."""
-        # Weak password
-        weak_score, weak_label = password_validator.get_strength("weak")
+        # Weak password (intentionally weak for testing)
+        weak_score, weak_label = password_validator.get_strength("weak")  # noqa: S105
         assert weak_label in ["Very Weak", "Weak"]
         
         # Strong password
-        strong_score, strong_label = password_validator.get_strength("Str0ng!P@ssw0rd#2024")
+        strong_score, strong_label = password_validator.get_strength(STRONG_TEST_PASSWORD)
         assert strong_label in ["Strong", "Very Strong"]
         assert strong_score > weak_score
     
@@ -156,7 +166,7 @@ class TestRegistrationValidation:
         result = validate_registration(
             username="testuser",
             email="test@example.com",
-            password="SecureP@ss123"
+            password=VALID_TEST_PASSWORD
         )
         assert result.is_valid is True
         assert len(result.errors) == 0
@@ -166,7 +176,7 @@ class TestRegistrationValidation:
         result = validate_registration(
             username="a",  # Too short
             email="notanemail",  # Invalid format
-            password="weak"  # Too weak
+            password="weak"  # noqa: S105 - intentionally weak for testing
         )
         assert result.is_valid is False
         assert len(result.errors) >= 3  # At least one error per field

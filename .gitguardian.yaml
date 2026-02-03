@@ -1,0 +1,22 @@
+# GitGuardian configuration
+# See: https://docs.gitguardian.com/ggshield-docs/reference/configuration
+
+version: 2
+
+# Paths to ignore during secret detection
+secret:
+  ignored_paths:
+    # Test files contain intentional fake credentials for testing
+    - "**/tests/**"
+    - "**/*_test.py"
+    - "**/test_*.py"
+    
+  # Specific patterns to ignore (test fixtures)
+  ignored_matches:
+    # Test password patterns
+    - match: "TestPass_*"
+      name: "Test password fixture"
+    - match: "Test*_123!"
+      name: "Test password fixture"
+    - match: "testpass*"
+      name: "Test password fixture"
