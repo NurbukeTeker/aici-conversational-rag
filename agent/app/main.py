@@ -1,5 +1,6 @@
 """Agent service - FastAPI application."""
 import logging
+from pathlib import Path
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
@@ -8,12 +9,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import get_settings
 from .models import (
     AnswerRequest, AnswerResponse, Evidence, ChunkEvidence, ObjectEvidence,
-    IngestRequest, IngestResponse, HealthResponse
+    IngestRequest, IngestResponse, HealthResponse, SyncStatusResponse, DocumentInfo
 )
 from .ingestion import PDFIngestionService
 from .vector_store import VectorStoreService
 from .reasoning import ReasoningService
 from .llm_service import LLMService
+from .document_registry import DocumentRegistry
+from .sync_service import DocumentSyncService
 
 # Configure logging
 logging.basicConfig(
@@ -27,14 +30,18 @@ vector_store: VectorStoreService | None = None
 ingestion_service: PDFIngestionService | None = None
 reasoning_service: ReasoningService | None = None
 llm_service: LLMService | None = None
+document_registry: DocumentRegistry | None = None
+sync_service: DocumentSyncService | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan handler."""
     global vector_store, ingestion_service, reasoning_service, llm_service
+    global document_registry, sync_service
     
     logger.info("Starting Agent service...")
+    settings = get_settings()
     
     # Initialize services
     vector_store = VectorStoreService()
@@ -42,15 +49,31 @@ async def lifespan(app: FastAPI):
     reasoning_service = ReasoningService()
     llm_service = LLMService()
     
-    # Auto-ingest if vector store is empty
-    if not vector_store.is_ready():
-        logger.info("Vector store is empty, auto-ingesting PDFs...")
-        chunks = ingestion_service.get_chunks_for_storage()
-        if chunks:
-            vector_store.add_documents(chunks)
-            logger.info(f"Auto-ingested {len(chunks)} chunks")
-        else:
-            logger.warning("No PDF documents found for ingestion")
+    # Initialize document registry and sync service
+    registry_path = Path(settings.chroma_persist_directory) / "document_registry.json"
+    document_registry = DocumentRegistry(registry_path)
+    sync_service = DocumentSyncService(
+        registry=document_registry,
+        ingestion_service=ingestion_service,
+        vector_store=vector_store
+    )
+    
+    # Incremental sync on startup (idempotent)
+    logger.info("Running incremental document sync...")
+    result = sync_service.sync(delete_missing=False)
+    
+    if result.has_changes:
+        logger.info(
+            f"Sync result: {result.new_documents} new, "
+            f"{result.updated_documents} updated, "
+            f"{result.total_chunks_added} chunks added"
+        )
+    else:
+        logger.info(f"No changes detected, {result.unchanged_documents} documents unchanged")
+    
+    if result.errors:
+        for error in result.errors:
+            logger.error(f"Sync error: {error}")
     
     logger.info("Agent service started successfully")
     
@@ -83,44 +106,62 @@ async def health_check():
     return HealthResponse(
         status="healthy",
         vector_store_ready=vector_store.is_ready() if vector_store else False,
-        documents_count=vector_store.count() if vector_store else 0
+        documents_count=vector_store.count() if vector_store else 0,
+        registered_documents=len(document_registry.get_all_records()) if document_registry else 0
+    )
+
+
+@app.get("/sync/status", response_model=SyncStatusResponse)
+async def get_sync_status():
+    """Get current document sync status."""
+    if not sync_service:
+        raise HTTPException(status_code=503, detail="Services not initialized")
+    
+    status = sync_service.get_status()
+    return SyncStatusResponse(
+        registered_documents=status["registered_documents"],
+        total_chunks=status["total_chunks"],
+        vector_store_count=status["vector_store_count"],
+        documents=[
+            DocumentInfo(
+                source_id=doc["source_id"],
+                version=doc["version"],
+                chunk_count=doc["chunk_count"],
+                page_count=doc["page_count"],
+                last_ingested_at=doc["last_ingested_at"],
+                content_hash=doc["content_hash"]
+            )
+            for doc in status["documents"]
+        ]
     )
 
 
 @app.post("/ingest", response_model=IngestResponse)
 async def ingest_documents(request: IngestRequest):
-    """Ingest PDF documents into the vector store."""
-    if not ingestion_service or not vector_store:
+    """Ingest PDF documents into the vector store (incremental sync)."""
+    if not sync_service:
         raise HTTPException(status_code=503, detail="Services not initialized")
     
     try:
-        # Clear if force reingest
         if request.force_reingest:
-            logger.info("Force reingest requested, clearing vector store...")
-            vector_store.clear()
+            logger.info("Force reingest requested...")
+            result = sync_service.force_reingest(source_id=request.source_id)
+        else:
+            logger.info("Running incremental sync...")
+            result = sync_service.sync(delete_missing=request.delete_missing)
         
-        # Get chunks
-        chunks = ingestion_service.get_chunks_for_storage()
-        
-        if not chunks:
-            return IngestResponse(
-                success=True,
-                documents_processed=0,
-                chunks_created=0,
-                message="No PDF documents found in data directory"
-            )
-        
-        # Count unique sources
-        sources = set(c["metadata"]["source"] for c in chunks)
-        
-        # Add to vector store
-        vector_store.add_documents(chunks)
+        total_docs = result.new_documents + result.updated_documents
         
         return IngestResponse(
             success=True,
-            documents_processed=len(sources),
-            chunks_created=len(chunks),
-            message=f"Successfully ingested {len(sources)} documents into {len(chunks)} chunks"
+            documents_processed=total_docs,
+            chunks_created=result.total_chunks_added,
+            message=(
+                f"Sync complete: {result.new_documents} new, "
+                f"{result.updated_documents} updated, "
+                f"{result.unchanged_documents} unchanged, "
+                f"{result.deleted_documents} deleted"
+            )
         )
         
     except Exception as e:
@@ -207,5 +248,10 @@ async def root():
         "service": "AICI Agent Service",
         "version": "1.0.0",
         "status": "running",
-        "endpoints": ["/health", "/ingest", "/answer"]
+        "endpoints": ["/health", "/sync/status", "/ingest", "/answer"],
+        "features": [
+            "Idempotent document ingestion with content hashing",
+            "Incremental sync (NEW, UNCHANGED, UPDATED, DELETED)",
+            "Hybrid RAG with persistent knowledge + ephemeral session"
+        ]
     }

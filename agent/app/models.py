@@ -1,4 +1,4 @@
-"""Pydantic models for Agent service."""
+﻿"""Pydantic models for Agent service."""
 from pydantic import BaseModel, Field
 from typing import Any
 
@@ -60,7 +60,15 @@ class IngestRequest(BaseModel):
     """Request model for /ingest endpoint."""
     force_reingest: bool = Field(
         default=False,
-        description="Force re-ingestion even if documents exist"
+        description="Force re-ingestion (clears registry and re-processes all)"
+    )
+    delete_missing: bool = Field(
+        default=False,
+        description="Delete chunks for documents no longer in source directory"
+    )
+    source_id: str | None = Field(
+        default=None,
+        description="Specific document to re-ingest (with force_reingest)"
     )
 
 
@@ -72,8 +80,27 @@ class IngestResponse(BaseModel):
     message: str
 
 
+class DocumentInfo(BaseModel):
+    """Information about a registered document."""
+    source_id: str
+    version: int
+    chunk_count: int
+    page_count: int
+    last_ingested_at: str
+    content_hash: str
+
+
+class SyncStatusResponse(BaseModel):
+    """Response model for /sync/status endpoint."""
+    registered_documents: int
+    total_chunks: int
+    vector_store_count: int
+    documents: list[DocumentInfo]
+
+
 class HealthResponse(BaseModel):
     """Response model for /health endpoint."""
     status: str
     vector_store_ready: bool
     documents_count: int
+    registered_documents: int = 0
