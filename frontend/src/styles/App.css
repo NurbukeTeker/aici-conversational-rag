@@ -311,26 +311,134 @@
   line-height: 1.7;
 }
 
-.qa-evidence {
+/* Collapsible Sources Panel */
+.sources-panel {
   margin-top: 1rem;
-  padding-top: 1rem;
   border-top: 1px solid var(--color-border);
+  padding-top: 0.75rem;
 }
 
-.qa-evidence-title {
+.sources-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.5rem 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  font-size: 0.8125rem;
+  text-align: left;
+  transition: color var(--transition-base);
+}
+
+.sources-toggle:hover {
+  color: var(--color-text-secondary);
+}
+
+.sources-toggle-icon {
+  font-size: 0.75rem;
+  width: 1rem;
+  text-align: center;
+  transition: transform 0.2s ease;
+}
+
+.sources-toggle-text {
+  font-weight: 500;
+}
+
+.sources-count {
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  font-weight: 400;
+}
+
+.sources-content {
+  padding: 0.75rem 0 0.25rem 1.5rem;
+  animation: fadeIn 0.2s ease;
+}
+
+.sources-section {
+  margin-bottom: 1rem;
+}
+
+.sources-section:last-child {
+  margin-bottom: 0;
+}
+
+.sources-section-title {
   font-size: 0.6875rem;
   font-weight: 500;
   color: var(--color-text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.05em;
   margin-bottom: 0.5rem;
 }
 
-.qa-evidence-item {
-  font-size: 0.75rem;
+.sources-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.source-item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
   color: var(--color-text-secondary);
-  padding: 0.25rem 0;
+}
+
+.source-file {
   font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--color-text-primary);
+}
+
+.source-meta {
+  font-size: 0.6875rem;
+  color: var(--color-text-muted);
+}
+
+.sources-layers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+
+.layer-chip {
+  display: inline-block;
+  padding: 0.25rem 0.5rem;
+  background: var(--color-surface-muted);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  font-family: var(--font-mono);
+  color: var(--color-text-secondary);
+}
+
+.sources-meta {
+  margin-top: 0.375rem;
+  font-size: 0.6875rem;
+  color: var(--color-text-muted);
+}
+
+.sources-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  background: var(--color-surface-muted);
+  border-radius: var(--radius-md);
+  font-size: 0.8125rem;
+  color: var(--color-text-muted);
+  line-height: 1.5;
+}
+
+.sources-note-icon {
+  flex-shrink: 0;
 }
 
 .qa-input-area {
