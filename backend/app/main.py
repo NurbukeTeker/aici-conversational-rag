@@ -1,20 +1,27 @@
 """Backend service - FastAPI application."""
+import json
 import logging
 import uuid
+from collections import Counter
 from contextlib import asynccontextmanager
 from typing import Annotated
 
 import httpx
-from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi import FastAPI, HTTPException, Depends, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
+from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
+from pydantic import ValidationError
 
 from .config import get_settings
 from .models import (
     UserRegister, UserResponse, Token,
     SessionObjects, SessionObjectsResponse,
     QARequest, QAResponse,
-    HealthResponse
+    HealthResponse, ErrorResponse, ErrorDetail,
+    MAX_PAYLOAD_SIZE_KB, MAX_OBJECTS_COUNT, EXAMPLE_DRAWING_OBJECTS,
+    format_validation_errors
 )
 from .auth import (
     get_password_hash, verify_password, create_access_token,
@@ -29,6 +36,108 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+# ============== Custom Exception Handlers ==============
+
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Handle Pydantic validation errors with field-level details."""
+    details = []
+    for error in exc.errors():
+        details.append({
+            "loc": list(error.get("loc", [])),
+            "msg": error.get("msg", "Validation error"),
+            "type": error.get("type", "value_error")
+        })
+    
+    # Check if this is about session objects
+    is_session_error = any("objects" in str(d.get("loc", [])) for d in details)
+    
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={
+            "error": "VALIDATION_ERROR",
+            "message": "Invalid request data. Please check the format and try again.",
+            "details": details,
+            "example": EXAMPLE_DRAWING_OBJECTS if is_session_error else None
+        }
+    )
+
+
+async def json_decode_exception_handler(request: Request, exc: json.JSONDecodeError):
+    """Handle JSON parsing errors."""
+    return JSONResponse(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        content={
+            "error": "INVALID_JSON",
+            "message": "Invalid JSON. Expected an array of drawing objects.",
+            "details": [{
+                "loc": [],
+                "msg": f"JSON parse error at position {exc.pos}: {exc.msg}",
+                "type": "json_invalid"
+            }],
+            "example": EXAMPLE_DRAWING_OBJECTS
+        }
+    )
+
+
+async def generic_exception_handler(request: Request, exc: Exception):
+    """Handle unexpected errors."""
+    logger.exception(f"Unexpected error: {exc}")
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={
+            "error": "INTERNAL_ERROR",
+            "message": "An unexpected error occurred. Please try again later.",
+            "details": []
+        }
+    )
+
+
+# ============== Request Size Limiter ==============
+
+class RequestSizeLimitMiddleware:
+    """Middleware to limit request body size."""
+    
+    def __init__(self, app, max_size_kb: int = MAX_PAYLOAD_SIZE_KB):
+        self.app = app
+        self.max_size_bytes = max_size_kb * 1024
+    
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        
+        content_length = None
+        for header_name, header_value in scope.get("headers", []):
+            if header_name == b"content-length":
+                try:
+                    content_length = int(header_value.decode())
+                except (ValueError, UnicodeDecodeError):
+                    pass
+                break
+        
+        # Check Content-Length header
+        if content_length is not None and content_length > self.max_size_bytes:
+            response = JSONResponse(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                content={
+                    "error": "PAYLOAD_TOO_LARGE",
+                    "message": f"Request payload too large. Maximum allowed: {MAX_PAYLOAD_SIZE_KB} KB",
+                    "details": [{
+                        "loc": [],
+                        "msg": f"Payload size ({content_length // 1024} KB) exceeds limit ({MAX_PAYLOAD_SIZE_KB} KB)",
+                        "type": "payload_too_large"
+                    }],
+                    "example": None
+                }
+            )
+            await response(scope, receive, send)
+            return
+        
+        await self.app(scope, receive, send)
+
+
+# ============== Application Lifecycle ==============
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -46,13 +155,17 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down Backend service...")
 
 
-# Create FastAPI app
+# ============== Create FastAPI App ==============
+
 app = FastAPI(
     title="AICI Backend Service",
     description="Authentication, Session Management, and QA Orchestration",
     version="1.0.0",
     lifespan=lifespan
 )
+
+# Add request size limiter
+app.add_middleware(RequestSizeLimitMiddleware)
 
 # Add CORS middleware
 app.add_middleware(
@@ -62,6 +175,44 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Register exception handlers
+app.add_exception_handler(RequestValidationError, validation_exception_handler)
+app.add_exception_handler(json.JSONDecodeError, json_decode_exception_handler)
+
+
+# ============== Helper Functions ==============
+
+def compute_layer_summary(objects: list[dict]) -> dict[str, int]:
+    """Compute count of objects per layer."""
+    layers = []
+    for obj in objects:
+        layer = obj.get("layer") or obj.get("Layer") or "Unknown"
+        layers.append(layer)
+    return dict(Counter(layers))
+
+
+def validate_objects_warnings(objects: list[dict]) -> list[str]:
+    """Check for non-fatal issues and return warnings."""
+    warnings = []
+    
+    if not objects:
+        warnings.append("No objects provided. Q&A will use only document knowledge.")
+    
+    # Check for objects missing geometry
+    objects_without_geometry = sum(1 for obj in objects if not obj.get("geometry"))
+    if objects_without_geometry > 0:
+        warnings.append(
+            f"{objects_without_geometry} object(s) have no geometry data. "
+            "Spatial queries may be limited."
+        )
+    
+    # Check for common layer types
+    layers = {(obj.get("layer") or "").lower() for obj in objects}
+    if not any("boundary" in l or "plot" in l for l in layers):
+        warnings.append("No 'Plot Boundary' layer detected.")
+    
+    return warnings
 
 
 # ============== Auth Endpoints ==============
@@ -124,20 +275,66 @@ async def login(
 
 # ============== Session Endpoints ==============
 
-@app.put("/session/objects", response_model=SessionObjectsResponse)
+@app.put(
+    "/session/objects",
+    response_model=SessionObjectsResponse,
+    responses={
+        400: {"model": ErrorResponse, "description": "Invalid JSON"},
+        413: {"model": ErrorResponse, "description": "Payload too large"},
+        422: {"model": ErrorResponse, "description": "Validation error"},
+    }
+)
 async def update_session_objects(
     data: SessionObjects,
     current_user: Annotated[TokenData, Depends(get_current_user)],
     session_service: Annotated[SessionService, Depends(get_session_service)]
 ):
-    """Update session drawing objects."""
+    """
+    Update session drawing objects.
+    
+    **Accepts:**
+    - `application/json` content type
+    - A JSON object with an `objects` array
+    
+    **Object Schema:**
+    Each object must have:
+    - `type`: Object type (LINE, POLYLINE, POLYGON, POINT, CIRCLE, ARC, TEXT, BLOCK)
+    - `layer`: Layer name (e.g., "Highway", "Plot Boundary", "Walls")
+    
+    Optional fields:
+    - `geometry`: Geometry data (structure depends on type)
+    - `properties`: Additional attributes (name, color, material, etc.)
+    
+    **Limits:**
+    - Maximum {max_objects} objects
+    - Maximum {max_size} KB payload size
+    
+    **Example:**
+    ```json
+    {{
+        "objects": [
+            {{
+                "type": "LINE",
+                "layer": "Highway",
+                "geometry": {{"start": [0, 0], "end": [100, 0]}},
+                "properties": {{"name": "Main Road", "width": 6}}
+            }}
+        ]
+    }}
+    ```
+    """.format(max_objects=MAX_OBJECTS_COUNT, max_size=MAX_PAYLOAD_SIZE_KB)
+    
     if not current_user.user_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid user session"
         )
     
-    success = session_service.set_objects(current_user.user_id, data.objects)
+    # Convert DrawingObject instances to dicts for storage
+    objects_list = [obj.model_dump() for obj in data.objects]
+    
+    # Store objects
+    success = session_service.set_objects(current_user.user_id, objects_list)
     
     if not success:
         raise HTTPException(
@@ -145,11 +342,20 @@ async def update_session_objects(
             detail="Failed to store session objects"
         )
     
+    # Retrieve stored objects
     objects, meta = session_service.get_objects(current_user.user_id)
+    
+    # Compute summaries
+    layer_summary = compute_layer_summary(objects)
+    warnings = validate_objects_warnings(objects)
+    
+    logger.info(f"Session updated for user {current_user.user_id}: {len(objects)} objects, layers: {layer_summary}")
     
     return SessionObjectsResponse(
         objects=objects,
         object_count=len(objects),
+        layer_summary=layer_summary,
+        validation_warnings=warnings,
         updated_at=meta.get("updated_at") if meta else None
     )
 
@@ -168,9 +374,15 @@ async def get_session_objects(
     
     objects, meta = session_service.get_objects(current_user.user_id)
     
+    # Compute summaries
+    layer_summary = compute_layer_summary(objects)
+    warnings = validate_objects_warnings(objects)
+    
     return SessionObjectsResponse(
         objects=objects,
         object_count=len(objects),
+        layer_summary=layer_summary,
+        validation_warnings=warnings,
         updated_at=meta.get("updated_at") if meta else None
     )
 
@@ -260,5 +472,9 @@ async def root():
         "service": "AICI Backend Service",
         "version": "1.0.0",
         "status": "running",
-        "endpoints": ["/auth/register", "/auth/login", "/session/objects", "/qa", "/health"]
+        "endpoints": ["/auth/register", "/auth/login", "/session/objects", "/qa", "/health"],
+        "limits": {
+            "max_objects": MAX_OBJECTS_COUNT,
+            "max_payload_kb": MAX_PAYLOAD_SIZE_KB
+        }
     }
