@@ -1,6 +1,7 @@
 ﻿version: '3.8'
 
 services:
+  # Redis - Session Store
   redis:
     image: redis:7-alpine
     container_name: aici-redis
@@ -14,6 +15,7 @@ services:
       timeout: 5s
       retries: 5
 
+  # Agent Service - RAG Pipeline
   agent:
     build:
       context: ./agent
@@ -33,7 +35,9 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 30s
 
+  # Backend Service - Auth + Session + Orchestration
   backend:
     build:
       context: ./backend
@@ -42,9 +46,9 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
-      - JWT_ALGORITHM=${JWT_ALGORITHM}
-      - JWT_ACCESS_TOKEN_EXPIRE_MINUTES=${JWT_ACCESS_TOKEN_EXPIRE_MINUTES}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-change-this-secret-key}
+      - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
+      - JWT_ACCESS_TOKEN_EXPIRE_MINUTES=${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-60}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_DB=0
@@ -54,7 +58,13 @@ services:
         condition: service_healthy
       agent:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
+  # Frontend - React App
   frontend:
     build:
       context: ./frontend
