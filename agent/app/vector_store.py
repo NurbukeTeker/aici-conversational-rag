@@ -112,6 +112,37 @@ class VectorStoreService:
         )
         logger.info("Vector store cleared")
     
+    def delete_by_ids(self, chunk_ids: list[str]) -> int:
+        """Delete specific chunks by their IDs."""
+        if not chunk_ids:
+            return 0
+        
+        try:
+            self.collection.delete(ids=chunk_ids)
+            logger.info(f"Deleted {len(chunk_ids)} chunks from vector store")
+            return len(chunk_ids)
+        except Exception as e:
+            logger.error(f"Error deleting chunks: {e}")
+            return 0
+    
+    def delete_by_source(self, source: str) -> int:
+        """Delete all chunks from a specific source document."""
+        try:
+            # Query to find all chunks with this source
+            results = self.collection.get(
+                where={"source": source},
+                include=[]
+            )
+            
+            if results["ids"]:
+                self.collection.delete(ids=results["ids"])
+                logger.info(f"Deleted {len(results['ids'])} chunks for source: {source}")
+                return len(results["ids"])
+            return 0
+        except Exception as e:
+            logger.error(f"Error deleting chunks by source: {e}")
+            return 0
+    
     def is_ready(self) -> bool:
         """Check if vector store has documents."""
         return self.collection.count() > 0
