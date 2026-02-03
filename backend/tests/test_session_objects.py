@@ -166,7 +166,12 @@ class TestSessionObjectsValidation:
             SessionObjects(objects=too_many)
         
         errors = exc_info.value.errors()
-        assert any("too many" in str(e["msg"]).lower() or "max" in str(e["msg"]).lower() for e in errors)
+        # Pydantic v2 uses "at most" in error message or "too_long" as error type
+        assert any(
+            "at most" in str(e["msg"]).lower() or 
+            e.get("type") == "too_long" 
+            for e in errors
+        )
 
 
 class TestLayerSummary:

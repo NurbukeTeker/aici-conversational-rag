@@ -57,7 +57,7 @@ class TestSessionModels:
         session = SessionObjects(objects=objects)
         
         assert len(session.objects) == 2
-        assert session.objects[0]["layer"] == "Highway"
+        assert session.objects[0].layer == "Highway"
 
 
 class TestQAModels:

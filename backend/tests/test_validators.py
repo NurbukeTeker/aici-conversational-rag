@@ -13,7 +13,7 @@ from app.validators import (
 # fmt: off
 VALID_TEST_PASSWORD = "TestPass_123!"  # noqa: S105  # gitguardian: ignore
 STRONG_TEST_PASSWORD = "Str0ng_T3st_Pass!"  # noqa: S105  # gitguardian: ignore
-COMMON_TEST_PASSWORD = "Password123!"  # noqa: S105  # gitguardian: ignore
+COMMON_TEST_PASSWORD = "Password123"  # noqa: S105  # gitguardian: ignore - matches "password123" in blocklist
 # fmt: on
 
 
