@@ -8,25 +8,41 @@ class TestPasswordHashing:
     
     def test_hash_password(self):
         """Test that password hashing works."""
-        password = "testpassword123"
+        password = "TestPassword123!"
         hashed = get_password_hash(password)
         
         assert hashed != password
         assert len(hashed) > 0
+        # Argon2 hashes start with $argon2
+        assert hashed.startswith("$argon2")
     
     def test_verify_correct_password(self):
         """Test that correct password verifies."""
-        password = "testpassword123"
+        password = "TestPassword123!"
         hashed = get_password_hash(password)
         
         assert verify_password(password, hashed) is True
     
     def test_verify_wrong_password(self):
         """Test that wrong password fails verification."""
-        password = "testpassword123"
+        password = "TestPassword123!"
         hashed = get_password_hash(password)
         
-        assert verify_password("wrongpassword", hashed) is False
+        assert verify_password("WrongPassword456!", hashed) is False
+    
+    def test_long_password_hashing(self):
+        """Test that long passwords work (Argon2 has no 72-byte limit like bcrypt)."""
+        long_password = "A" * 200 + "1" + "!" + "a"
+        hashed = get_password_hash(long_password)
+        
+        assert verify_password(long_password, hashed) is True
+    
+    def test_unicode_password(self):
+        """Test that unicode passwords work."""
+        password = "Secure🔐Password123!"
+        hashed = get_password_hash(password)
+        
+        assert verify_password(password, hashed) is True
 
 
 class TestJWT:
@@ -39,13 +55,23 @@ class TestJWT:
         
         assert token is not None
         assert len(token) > 0
+        # JWT tokens have 3 parts separated by dots
+        assert len(token.split(".")) == 3
     
     def test_decode_valid_token(self):
         """Test decoding a valid token."""
-        data = {"sub": "testuser", "user_id": "123"}
+        data = {"sub": "testuser", "user_id": "uuid-123-456"}
         token = create_access_token(data)
         
         decoded = decode_token(token)
         
         assert decoded.username == "testuser"
-        assert decoded.user_id == "123"
+        assert decoded.user_id == "uuid-123-456"
+    
+    def test_token_with_special_characters(self):
+        """Test token with special characters in data."""
+        data = {"sub": "test_user.name", "user_id": "uuid-123"}
+        token = create_access_token(data)
+        decoded = decode_token(token)
+        
+        assert decoded.username == "test_user.name"

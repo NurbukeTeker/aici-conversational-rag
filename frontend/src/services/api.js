@@ -64,6 +64,24 @@ export const authApi = {
       return res.json();
     });
   },
+  
+  // Get current user info
+  me: () => request('/auth/me'),
+  
+  // Check username availability
+  checkUsername: (username) =>
+    request(`/auth/check-username?username=${encodeURIComponent(username)}`),
+  
+  // Check email availability
+  checkEmail: (email) =>
+    request(`/auth/check-email?email=${encodeURIComponent(email)}`),
+  
+  // Check password strength
+  checkPassword: (password) =>
+    request('/auth/check-password', {
+      method: 'POST',
+      body: JSON.stringify(password),
+    }),
 };
 
 // Session API

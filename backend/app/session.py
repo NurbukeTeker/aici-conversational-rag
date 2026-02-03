@@ -106,65 +106,13 @@ class SessionService:
             return False
 
 
-# Simple in-memory user store (for demo purposes)
-# In production, use a proper database
-class UserStore:
-    """Simple in-memory user store."""
-    
-    def __init__(self):
-        self._users: dict[str, dict] = {}
-        self._email_index: dict[str, str] = {}
-    
-    def create_user(
-        self,
-        user_id: str,
-        username: str,
-        email: str,
-        hashed_password: str
-    ) -> dict:
-        """Create a new user."""
-        if username in self._users:
-            raise ValueError(f"Username '{username}' already exists")
-        if email in self._email_index:
-            raise ValueError(f"Email '{email}' already registered")
-        
-        user = {
-            "user_id": user_id,
-            "username": username,
-            "email": email,
-            "hashed_password": hashed_password
-        }
-        
-        self._users[username] = user
-        self._email_index[email] = username
-        
-        return user
-    
-    def get_user(self, username: str) -> dict | None:
-        """Get user by username."""
-        return self._users.get(username)
-    
-    def user_exists(self, username: str) -> bool:
-        """Check if username exists."""
-        return username in self._users
-
-
-# Global instances
+# Global instance
 session_service: SessionService | None = None
-user_store: UserStore | None = None
 
 
 def get_session_service() -> SessionService:
-    """Get session service instance."""
+    """Get session service instance (FastAPI dependency)."""
     global session_service
     if session_service is None:
         session_service = SessionService()
     return session_service
-
-
-def get_user_store() -> UserStore:
-    """Get user store instance."""
-    global user_store
-    if user_store is None:
-        user_store = UserStore()
-    return user_store
