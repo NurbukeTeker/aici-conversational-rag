@@ -9,12 +9,19 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     // Check for existing token on mount
-    const storedToken = localStorage.getItem('token');
-    const storedUser = localStorage.getItem('user');
-    
-    if (storedToken && storedUser) {
-      setToken(storedToken);
-      setUser(JSON.parse(storedUser));
+    try {
+      const storedToken = localStorage.getItem('token');
+      const storedUser = localStorage.getItem('user');
+      
+      if (storedToken && storedUser) {
+        setToken(storedToken);
+        setUser(JSON.parse(storedUser));
+      }
+    } catch (error) {
+      // Clear corrupted data
+      console.error('Error loading auth data:', error);
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
     }
     setLoading(false);
   }, []);
