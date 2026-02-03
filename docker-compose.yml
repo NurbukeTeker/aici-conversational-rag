@@ -1,6 +1,4 @@
-﻿version: '3.8'
-
-services:
+﻿services:
   # Redis - Session Store
   redis:
     image: redis:7-alpine
