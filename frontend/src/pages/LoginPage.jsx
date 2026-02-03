@@ -308,9 +308,14 @@ function LoginPage() {
                   autoComplete="username"
                   className={mode === 'register' && (validation.username.available === false || (formData.username && !/^[a-zA-Z][a-zA-Z0-9_]*$/.test(formData.username))) ? 'input-error' : ''}
                 />
-                {mode === 'register' && renderFieldStatus('username')}
+                {mode === 'register' && validation.username.checking && (
+                  <span className="field-status checking">Checking...</span>
+                )}
+                {mode === 'register' && validation.username.available === true && (
+                  <span className="field-status available">✓ Available</span>
+                )}
               </div>
-              {mode === 'register' && formData.username && !/^[a-zA-Z][a-zA-Z0-9_]*$/.test(formData.username) && (
+              {mode === 'register' && formData.username && !/^[a-zA-Z][a-zA-Z0-9_]*$/.test(formData.username) && validation.username.available !== false && (
                 <div className="validation-error" style={{ marginTop: '0.5rem' }}>
                   <svg className="validation-icon" viewBox="0 0 20 20" fill="currentColor">
                     <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
@@ -318,7 +323,15 @@ function LoginPage() {
                   <span>Username must start with a letter and contain only letters, numbers, and underscores</span>
                 </div>
               )}
-              {mode === 'register' && formData.username && /^[a-zA-Z][a-zA-Z0-9_]*$/.test(formData.username) && formData.username.length < 3 && (
+              {mode === 'register' && validation.username.available === false && (
+                <div className="validation-error" style={{ marginTop: '0.5rem' }}>
+                  <svg className="validation-icon" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                  </svg>
+                  <span>{validation.username.message || 'Username is not available'}</span>
+                </div>
+              )}
+              {mode === 'register' && formData.username && /^[a-zA-Z][a-zA-Z0-9_]*$/.test(formData.username) && formData.username.length < 3 && validation.username.available !== false && (
                 <div className="field-hint">Username must be at least 3 characters</div>
               )}
               {mode === 'register' && !formData.username && (
