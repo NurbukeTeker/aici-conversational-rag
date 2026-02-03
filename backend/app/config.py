@@ -16,11 +16,26 @@ class Settings(BaseSettings):
     redis_port: int = 6379
     redis_db: int = 0
     
+    # Database Configuration
+    database_url: str = "sqlite:///./data/users.db"
+    database_echo: bool = False
+    
     # Agent Service
     agent_service_url: str = "http://agent:8001"
     
     # Session Configuration
     session_ttl_seconds: int = 3600  # 1 hour
+    
+    # Password Policy
+    password_min_length: int = 8
+    password_require_uppercase: bool = True
+    password_require_lowercase: bool = True
+    password_require_digit: bool = True
+    password_require_special: bool = True
+    
+    # Username Policy
+    username_min_length: int = 3
+    username_max_length: int = 30
     
     class Config:
         env_file = ".env"

@@ -51,6 +51,9 @@
       - REDIS_PORT=6379
       - REDIS_DB=0
       - AGENT_SERVICE_URL=http://agent:8001
+      - DATABASE_URL=sqlite:////data/users.db
+    volumes:
+      - ./data:/data
     depends_on:
       redis:
         condition: service_healthy

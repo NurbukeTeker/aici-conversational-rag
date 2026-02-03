@@ -80,20 +80,27 @@
   background: transparent;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  color: var(--color-text-secondary);
+  color: var(--color-text-primary);
   cursor: pointer;
   transition: all var(--transition-fast);
+  padding: 0;
 }
 
 .theme-toggle:hover {
   background: var(--color-surface-muted);
-  color: var(--color-text-primary);
   border-color: var(--color-border-strong);
 }
 
 .theme-toggle svg {
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.theme-icon {
+  width: 20px;
+  height: 20px;
+  display: block;
 }
 
 .btn-logout {
