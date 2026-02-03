@@ -1,13 +1,23 @@
-fastapi==0.109.2
-uvicorn[standard]==0.27.1
-openai>=1.12.0
-chromadb>=0.4.22
-pypdf>=4.0.1
-tiktoken>=0.5.2,<0.6.0
-pydantic>=2.6.1
-pydantic-settings>=2.1.0
-langchain>=0.1.6
-langchain-community>=0.0.19
-langchain-openai>=0.0.5
-sentence-transformers>=2.3.1
-pytest>=8.0.0
+# Agent Service - SOTA Dependencies (2026)
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+pydantic>=2.10.0
+pydantic-settings>=2.6.0
+
+# OpenAI & LLM
+openai>=1.58.0
+tiktoken>=0.8.0
+
+# LangChain (latest stable)
+langchain>=0.3.0
+langchain-openai>=0.2.0
+langchain-community>=0.3.0
+
+# Vector Store
+chromadb>=0.5.0
+
+# PDF Processing
+pypdf>=5.1.0
+
+# Testing
+pytest>=8.3.0
