@@ -30,7 +30,7 @@ class TestAcceptanceJsonOnly:
     def test_how_many_layers_json_only_no_retrieval(self, client):
         """Q: How many drawing layers present? -> JSON_ONLY, no retrieval."""
         with patch("app.retrieval_lc.retrieve", MagicMock(return_value=[])) as mock_retrieve:
-            with patch("app.graph_lc.nodes.invoke_hybrid", MagicMock(return_value="There are 5 layers.")):
+            with patch("app.lc.chains.invoke_hybrid", MagicMock(return_value="There are 5 layers.")):
                 session_objects = [
                     {"layer": "Highway", "type": "line"},
                     {"layer": "Plot Boundary", "type": "polygon"},
@@ -68,7 +68,7 @@ class TestAcceptanceDocOnly:
             "distance": 0.1,
         }
         with patch("app.retrieval_lc.retrieve", MagicMock(return_value=[highway_chunk])) as mock_retrieve:
-            with patch("app.graph_lc.nodes.invoke_doc_only", MagicMock(return_value="A highway is a public right of way.")):
+            with patch("app.lc.chains.invoke_doc_only", MagicMock(return_value="A highway is a public right of way.")):
                 resp = client.post(
                     "/answer",
                     json={"question": "What is the definition of a highway?", "session_objects": []},

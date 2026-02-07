@@ -27,8 +27,8 @@ class TestAnswerEndpoints:
     def test_smalltalk_returns_smalltalk_response_no_retrieval_llm(self, client):
         """Test 1: smalltalk -> returns SMALLTALK_RESPONSE, no retrieval/LLM."""
         with patch("app.retrieval_lc.retrieve", MagicMock(return_value=[])) as mock_retrieve:
-            with patch("app.graph_lc.nodes.invoke_doc_only", MagicMock(return_value="")) as mock_llm:
-                with patch("app.graph_lc.nodes.invoke_hybrid", MagicMock(return_value="")):
+            with patch("app.lc.chains.invoke_doc_only", MagicMock(return_value="")) as mock_llm:
+                with patch("app.lc.chains.invoke_hybrid", MagicMock(return_value="")):
                     resp = client.post(
                         "/answer",
                         json={"question": "hi", "session_objects": []},
@@ -44,7 +44,7 @@ class TestAnswerEndpoints:
     def test_missing_geometry_returns_deterministic_guard_message(self, client):
         """Test 2: missing geometry -> returns deterministic guard message."""
         with patch("app.retrieval_lc.retrieve", MagicMock(return_value=[])):
-            with patch("app.graph_lc.nodes.invoke_hybrid", MagicMock(return_value="Yes.")):
+            with patch("app.lc.chains.invoke_hybrid", MagicMock(return_value="Yes.")):
                 session_objects = [
                     {"layer": "Highway", "geometry": None, "type": "line"},
                     {"layer": "Plot Boundary", "geometry": None, "type": "polygon"},
@@ -88,8 +88,8 @@ class TestAnswerEndpoints:
             {"id": "chunk_1", "source": "doc", "page": "1", "section": "A", "text": "A highway is a public road.", "distance": 0.1}
         ]
         with patch("app.retrieval_lc.retrieve", MagicMock(return_value=mock_chunks)):
-            with patch("app.graph_lc.nodes.invoke_doc_only", MagicMock(return_value="A highway is...")) as mock_doc:
-                with patch("app.graph_lc.nodes.invoke_hybrid", MagicMock(return_value="Hybrid answer.")):
+            with patch("app.lc.chains.invoke_doc_only", MagicMock(return_value="A highway is...")) as mock_doc:
+                with patch("app.lc.chains.invoke_hybrid", MagicMock(return_value="Hybrid answer.")):
                     resp = client.post(
                         "/answer",
                         json={
@@ -107,7 +107,7 @@ class TestAnswerEndpoints:
     def test_doc_only_empty_retrieval_returns_override_message(self, client):
         """DOC_ONLY with no retrieved docs: answer is override message."""
         with patch("app.retrieval_lc.retrieve", MagicMock(return_value=[])):
-            with patch("app.graph_lc.nodes.invoke_hybrid", MagicMock(return_value="Hybrid.")):
+            with patch("app.lc.chains.invoke_hybrid", MagicMock(return_value="Hybrid.")):
                 resp = client.post(
                     "/answer",
                     json={"question": "what is definition of highway?", "session_objects": []},
@@ -126,7 +126,7 @@ class TestAnswerEndpoints:
             {"id": "chunk_1", "source": "doc", "page": "1", "section": "A", "text": "Planning rules.", "distance": 0.1}
         ]
         with patch("app.retrieval_lc.retrieve", MagicMock(return_value=mock_chunks)) as mock_retrieve:
-            with patch("app.graph_lc.nodes.invoke_hybrid", MagicMock(return_value="The extension complies.")):
+            with patch("app.lc.chains.invoke_hybrid", MagicMock(return_value="The extension complies.")):
                 session_objects = [
                     {"layer": "Extension", "geometry": {"coordinates": [[0, 0], [1, 0], [1, 1]]}, "properties": {"name": "Ext1"}},
                     {"layer": "Plot Boundary", "geometry": {"coordinates": [[0, 0], [10, 0]]}},
@@ -148,7 +148,7 @@ class TestAnswerEndpoints:
     def test_json_only_question_returns_answer(self, client):
         """JSON-only (e.g. how many layers) returns answer, no retrieval."""
         with patch("app.retrieval_lc.retrieve", MagicMock(return_value=[])) as mock_retrieve:
-            with patch("app.graph_lc.nodes.invoke_hybrid", MagicMock(return_value="There are 3 layers.")):
+            with patch("app.lc.chains.invoke_hybrid", MagicMock(return_value="There are 3 layers.")):
                 session_objects = [
                     {"layer": "Highway", "geometry": None},
                     {"layer": "Plot Boundary", "geometry": None},
