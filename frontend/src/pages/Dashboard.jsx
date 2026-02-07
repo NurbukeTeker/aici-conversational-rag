@@ -1,7 +1,16 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { sessionApi, qaApi, exportApi, ApiError } from '../services/api';
+
+// WebSocket URL for real-time streaming Q&A (proxied in dev to backend)
+function getWsQaUrl() {
+  const token = localStorage.getItem('token');
+  if (!token) return null;
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const host = window.location.host;
+  return `${protocol}//${host}/api/ws/qa?token=${encodeURIComponent(token)}`;
+}
 
 // Sample drawing objects from the specification
 const SAMPLE_OBJECTS = [
@@ -26,6 +35,9 @@ function Dashboard() {
   const [question, setQuestion] = useState('');
   const [messages, setMessages] = useState([]);
   const [asking, setAsking] = useState(false);
+  const [streamingAnswer, setStreamingAnswer] = useState(''); // current streaming text for live update
+  const wsRef = useRef(null);
+  const [wsReady, setWsReady] = useState(false);
   
   // Export state
   const [exportingExcel, setExportingExcel] = useState(false);
@@ -35,6 +47,22 @@ function Dashboard() {
   // Load session objects on mount
   useEffect(() => {
     loadSessionObjects();
+  }, []);
+
+  // WebSocket for real-time streaming: connect on mount when token exists
+  useEffect(() => {
+    const url = getWsQaUrl();
+    if (!url) return;
+    const ws = new WebSocket(url);
+    ws.onopen = () => setWsReady(true);
+    ws.onclose = () => setWsReady(false);
+    ws.onerror = () => setWsReady(false);
+    wsRef.current = ws;
+    return () => {
+      ws.close();
+      wsRef.current = null;
+      setWsReady(false);
+    };
   }, []);
 
   const loadSessionObjects = async () => {
@@ -94,12 +122,64 @@ function Dashboard() {
     setAsking(true);
     const currentQuestion = question;
     setQuestion('');
+    const msgId = Date.now();
 
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      // Real-time path: stream via WebSocket
+      setStreamingAnswer('');
+      setMessages(prev => [...prev, {
+        id: msgId,
+        question: currentQuestion,
+        answer: '',
+        evidence: null,
+        sessionSummary: null,
+        streaming: true
+      }]);
+      const handler = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.t === 'chunk') {
+            setStreamingAnswer(prev => prev + (data.c || ''));
+          } else if (data.t === 'done') {
+            ws.removeEventListener('message', handler);
+            setMessages(prev => prev.map(m =>
+              m.id === msgId
+                ? {
+                    ...m,
+                    answer: data.answer ?? '',
+                    evidence: data.evidence ?? null,
+                    sessionSummary: data.session_summary ?? null,
+                    streaming: false
+                  }
+                : m
+            ));
+            setStreamingAnswer('');
+            setAsking(false);
+          } else if (data.t === 'error') {
+            ws.removeEventListener('message', handler);
+            setMessages(prev => prev.map(m =>
+              m.id === msgId
+                ? { ...m, answer: `Error: ${data.message || 'Stream failed'}`, evidence: null, streaming: false }
+                : m
+            ));
+            setStreamingAnswer('');
+            setAsking(false);
+          }
+        } catch (err) {
+          // ignore parse errors
+        }
+      };
+      ws.addEventListener('message', handler);
+      ws.send(JSON.stringify({ question: currentQuestion }));
+      return;
+    }
+
+    // Fallback: REST
     try {
       const response = await qaApi.ask(currentQuestion);
-      
       setMessages(prev => [...prev, {
-        id: Date.now(),
+        id: msgId,
         question: currentQuestion,
         answer: response.answer,
         evidence: response.evidence,
@@ -107,7 +187,7 @@ function Dashboard() {
       }]);
     } catch (err) {
       setMessages(prev => [...prev, {
-        id: Date.now(),
+        id: msgId,
         question: currentQuestion,
         answer: `Error: ${err instanceof ApiError ? err.message : 'Failed to get answer'}`,
         evidence: null
@@ -126,9 +206,11 @@ function Dashboard() {
     }
   };
 
-  // Prepare dialogues for export
+  // Prepare dialogues for export (exclude messages still streaming)
   const prepareDialoguesForExport = () => {
-    return messages.map(msg => ({
+    return messages
+      .filter(msg => !msg.streaming)
+      .map(msg => ({
       question: msg.question,
       answer: msg.answer,
       evidence: msg.evidence || null,
@@ -378,9 +460,12 @@ function Dashboard() {
                       <div>{msg.question}</div>
                     </div>
                     <div className="qa-answer">
-                      <div className="qa-answer-text">{msg.answer}</div>
+                      <div className="qa-answer-text">
+                        {msg.streaming ? streamingAnswer : msg.answer}
+                        {msg.streaming && !streamingAnswer && <span className="qa-streaming-cursor">▌</span>}
+                      </div>
                       
-                      {msg.evidence && (
+                      {msg.evidence && !msg.streaming && (
                         <div className="qa-evidence">
                           <div className="qa-evidence-title">Evidence</div>
                           {msg.evidence.document_chunks?.length > 0 && (
@@ -404,7 +489,7 @@ function Dashboard() {
                 ))
               )}
               
-              {asking && (
+              {asking && !messages.some(m => m.streaming) && (
                 <div className="qa-message">
                   <div className="qa-answer" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                     <span className="spinner" />

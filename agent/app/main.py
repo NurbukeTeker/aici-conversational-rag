@@ -1,10 +1,12 @@
 """Agent service - FastAPI application."""
+import json
 import logging
 from pathlib import Path
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
 from .config import get_settings
 from .models import (
@@ -241,6 +243,84 @@ async def answer_question(request: AnswerRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+async def _stream_answer_ndjson(request: AnswerRequest):
+    """Async generator yielding NDJSON lines for streaming response."""
+    if not vector_store or not reasoning_service or not llm_service:
+        yield json.dumps({"t": "error", "message": "Services not initialized"}) + "\n"
+        return
+    if not llm_service.is_available():
+        yield json.dumps({"t": "error", "message": "LLM not configured"}) + "\n"
+        return
+    try:
+        warnings = reasoning_service.validate_json_schema(request.session_objects)
+        if warnings:
+            logger.warning(f"JSON validation warnings: {warnings}")
+        session_summary = reasoning_service.compute_session_summary(request.session_objects)
+        settings = get_settings()
+        retrieved_chunks = vector_store.search(
+            query=request.question,
+            top_k=settings.retrieval_top_k
+        )
+        full_answer_chunks = []
+        async for chunk in llm_service.generate_answer_stream_async(
+            question=request.question,
+            session_objects=request.session_objects,
+            session_summary=session_summary.model_dump(),
+            retrieved_chunks=retrieved_chunks
+        ):
+            full_answer_chunks.append(chunk)
+            yield json.dumps({"t": "chunk", "c": chunk}) + "\n"
+        full_answer = "".join(full_answer_chunks)
+        layers_used, indices_used = reasoning_service.extract_layers_used(
+            request.session_objects,
+            request.question
+        )
+        chunk_evidence = [
+            {
+                "chunk_id": c["id"],
+                "source": c["source"],
+                "page": c.get("page"),
+                "section": c.get("section"),
+                "text_snippet": (c["text"][:200] + "..." if len(c["text"]) > 200 else c["text"]),
+            }
+            for c in retrieved_chunks
+        ]
+        object_evidence = (
+            {"layers_used": list(set(layers_used)), "object_indices": indices_used}
+            if layers_used else None
+        )
+        done_payload = {
+            "t": "done",
+            "answer": full_answer,
+            "evidence": {
+                "document_chunks": chunk_evidence,
+                "session_objects": object_evidence,
+            },
+            "session_summary": session_summary.model_dump(),
+        }
+        yield json.dumps(done_payload) + "\n"
+    except Exception as e:
+        logger.error(f"Error streaming answer: {e}")
+        yield json.dumps({"t": "error", "message": str(e)}) + "\n"
+
+
+@app.post("/answer/stream")
+async def answer_question_stream(request: AnswerRequest):
+    """
+    Answer a question using hybrid RAG with streaming response.
+    Returns NDJSON stream: lines of {"t":"chunk","c":"..."} then {"t":"done", ...}.
+    """
+    if not vector_store or not reasoning_service or not llm_service:
+        raise HTTPException(status_code=503, detail="Services not initialized")
+    if not llm_service.is_available():
+        raise HTTPException(status_code=503, detail="LLM service not configured (missing API key)")
+    return StreamingResponse(
+        _stream_answer_ndjson(request),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @app.get("/")
 async def root():
     """Root endpoint."""
@@ -248,7 +328,7 @@ async def root():
         "service": "AICI Agent Service",
         "version": "1.0.0",
         "status": "running",
-        "endpoints": ["/health", "/sync/status", "/ingest", "/answer"],
+        "endpoints": ["/health", "/sync/status", "/ingest", "/answer", "/answer/stream"],
         "features": [
             "Idempotent document ingestion with content hashing",
             "Incremental sync (NEW, UNCHANGED, UPDATED, DELETED)",

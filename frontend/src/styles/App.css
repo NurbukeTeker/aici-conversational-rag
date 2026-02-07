@@ -311,6 +311,16 @@
   line-height: 1.7;
 }
 
+.qa-streaming-cursor {
+  display: inline-block;
+  animation: qa-cursor-blink 0.8s step-end infinite;
+  margin-left: 1px;
+}
+
+@keyframes qa-cursor-blink {
+  50% { opacity: 0; }
+}
+
 .qa-evidence {
   margin-top: 1rem;
   padding-top: 1rem;
