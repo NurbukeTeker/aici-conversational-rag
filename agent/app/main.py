@@ -22,6 +22,7 @@ from .sync_service import DocumentSyncService
 from . import smalltalk
 from . import routing
 from . import geometry_guard
+from . import followups
 from .retrieval import postprocess_retrieved_chunks
 
 # Configure logging
@@ -216,6 +217,18 @@ async def answer_question(request: AnswerRequest):
                     session_summary=session_summary,
                 )
         
+        # Needs-input follow-up: "what it needs?" etc. after geometry refusal → deterministic checklist, no retrieval/LLM
+        if followups.is_needs_input_followup(request.question):
+            missing_layers = followups.get_missing_geometry_layers(request.session_objects)
+            if missing_layers:
+                logger.info("Needs-input follow-up: returning checklist for %s", missing_layers)
+                session_summary = reasoning_service.compute_session_summary(request.session_objects)
+                return AnswerResponse(
+                    answer=followups.build_needs_input_message(missing_layers),
+                    evidence=Evidence(document_chunks=[], session_objects=None),
+                    session_summary=session_summary,
+                )
+        
         # Compute session summary
         session_summary = reasoning_service.compute_session_summary(request.session_objects)
         logger.info(f"Session summary: {session_summary.layer_counts}")
@@ -327,6 +340,20 @@ async def _stream_answer_ndjson(request: AnswerRequest):
                 yield json.dumps({
                     "t": "done",
                     "answer": geom_answer,
+                    "evidence": {"document_chunks": [], "session_objects": None},
+                    "session_summary": session_summary.model_dump(),
+                }) + "\n"
+                return
+        # Needs-input follow-up: "what it needs?" etc. → deterministic checklist, no retrieval/LLM
+        if followups.is_needs_input_followup(request.question):
+            missing_layers = followups.get_missing_geometry_layers(request.session_objects)
+            if missing_layers:
+                logger.info("Needs-input follow-up (stream): returning checklist for %s", missing_layers)
+                followup_answer = followups.build_needs_input_message(missing_layers)
+                yield json.dumps({"t": "chunk", "c": followup_answer}) + "\n"
+                yield json.dumps({
+                    "t": "done",
+                    "answer": followup_answer,
                     "evidence": {"document_chunks": [], "session_objects": None},
                     "session_summary": session_summary.model_dump(),
                 }) + "\n"
