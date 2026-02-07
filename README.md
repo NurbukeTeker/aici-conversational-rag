@@ -147,6 +147,16 @@ docker compose up --build
 
 Place PDFs in `data/pdfs/` before or after first run; ingestion runs on agent startup.
 
+**Running tests:**
+
+```bash
+# Agent tests (from repo root)
+cd agent && python -m pytest tests/ -v
+
+# Backend tests
+cd backend && python -m pytest tests/ -v
+```
+
 ---
 
 ## 8. Example Queries
@@ -215,7 +225,7 @@ These go beyond a minimal hybrid RAG implementation:
 ├── agent/             # FastAPI — hybrid RAG
 │   ├── app/           # main, ingestion, vector_store, document_registry, sync_service,
 │   │                  # lc/ (prompts, chains), retrieval_lc, graph_lc/ (state, nodes, graph_builder),
-│   │                  # reasoning, routing, smalltalk, geometry_guard, followups
+│   │                  # reasoning, routing, smalltalk, geometry_guard, doc_only_guard, followups
 │   └── Dockerfile
 ├── data/
 │   ├── pdfs/          # Place PDFs here

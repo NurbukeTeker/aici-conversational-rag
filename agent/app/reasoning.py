@@ -53,6 +53,36 @@ class ReasoningService:
             limitations=limitations
         )
     
+    def _object_has_geometry(self, obj: dict[str, Any]) -> bool:
+        """
+        True only if the object has usable coordinate/geometry data.
+        - geometry must be non-null AND contain coordinate arrays (GeoJSON-like: geometry.coordinates).
+        - OR object has top-level "coordinates" with a non-empty list.
+        """
+        if not obj or not isinstance(obj, dict):
+            return False
+        # Top-level coordinates (e.g. [x, y] or [[x,y], ...])
+        coords = obj.get("coordinates")
+        if coords is not None and isinstance(coords, (list, tuple)):
+            if len(coords) > 0:
+                first = coords[0]
+                if isinstance(first, (list, tuple)):
+                    return len(first) > 0
+                return True
+        # geometry dict with coordinates
+        geometry = obj.get("geometry")
+        if geometry is None or not isinstance(geometry, dict):
+            return False
+        coords = geometry.get("coordinates")
+        if coords is None:
+            return False
+        if isinstance(coords, (list, tuple)) and len(coords) > 0:
+            first = coords[0]
+            if isinstance(first, (list, tuple)):
+                return len(first) > 0
+            return True
+        return False
+
     def _detect_limitations(
         self,
         objects: list[dict[str, Any]],
@@ -81,14 +111,10 @@ class ReasoningService:
         if not has_measurements:
             limitations.append("No measurement data found in objects")
         
-        # Check for coordinate data
+        # Check for coordinate data: geometry must be non-null and contain coordinate arrays
         has_coordinates = False
         for obj in objects:
-            if "coordinates" in obj or "geometry" in obj:
-                has_coordinates = True
-                break
-            props = obj.get("properties", {})
-            if isinstance(props, dict) and ("x" in props or "coordinates" in props):
+            if self._object_has_geometry(obj):
                 has_coordinates = True
                 break
         

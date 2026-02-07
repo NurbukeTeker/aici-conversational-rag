@@ -120,6 +120,44 @@ class TestAnswerEndpoints:
         assert "No explicit definition was found" in answer
         assert "retrieved documents" in answer or "retrieved" in answer.lower()
 
+    def test_doc_only_term_not_in_chunks_rest_returns_not_found(self, client):
+        """DOC_ONLY when asked term is not in retrieved chunks: REST returns same not-found message (guard applied)."""
+        from app.lc.chains import DOC_ONLY_EMPTY_MESSAGE
+        # Chunks that do NOT contain "side elevation"
+        mock_chunks = [
+            {"id": "1", "source": "doc", "page": "1", "text": "Principal elevation fronts the highway.", "distance": 0.2},
+        ]
+        with patch("app.retrieval_lc.retrieve", MagicMock(return_value=mock_chunks)):
+            with patch("app.lc.chains.invoke_doc_only", MagicMock(return_value="Hallucinated definition.")) as mock_doc:
+                resp = client.post(
+                    "/answer",
+                    json={"question": "What is meant by 'side elevation'?", "session_objects": []},
+                )
+        if resp.status_code == 503:
+            pytest.skip("Services not initialized in this environment")
+        assert resp.status_code == 200
+        assert resp.json().get("answer", "").strip() == DOC_ONLY_EMPTY_MESSAGE.strip()
+        mock_doc.assert_not_called()
+
+    def test_doc_only_term_not_in_chunks_streaming_same_answer(self, client):
+        """DOC_ONLY when term not in chunks: streaming done payload has same not-found message as REST (guard applied)."""
+        from app.lc.chains import DOC_ONLY_EMPTY_MESSAGE
+        mock_chunks = [
+            {"id": "1", "source": "doc", "page": "1", "text": "Principal elevation only.", "distance": 0.2},
+        ]
+        with patch("app.retrieval_lc.retrieve", MagicMock(return_value=mock_chunks)):
+            resp = client.post(
+                "/answer/stream",
+                json={"question": "What is meant by 'side elevation'?", "session_objects": []},
+            )
+        if resp.status_code == 503:
+            pytest.skip("Services not initialized in this environment")
+        assert resp.status_code == 200
+        lines = [line.strip() for line in resp.text.strip().split("\n") if line.strip()]
+        last = json.loads(lines[-1])
+        assert last.get("t") == "done"
+        assert last.get("answer", "").strip() == DOC_ONLY_EMPTY_MESSAGE.strip()
+
     def test_hybrid_returns_answer(self, client):
         """Test 5: hybrid question -> retriever + hybrid chain."""
         mock_chunks = [

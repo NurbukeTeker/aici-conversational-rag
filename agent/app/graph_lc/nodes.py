@@ -115,7 +115,8 @@ def retrieve_node(state: GraphState) -> dict[str, Any]:
 
 def llm_node(state: GraphState) -> dict[str, Any]:
     """Invoke LCEL chain (doc_only or hybrid)."""
-    from ..lc.chains import invoke_doc_only, invoke_hybrid
+    from ..lc.chains import DOC_ONLY_EMPTY_MESSAGE, invoke_doc_only, invoke_hybrid
+    from ..doc_only_guard import should_use_retrieved_for_doc_only
 
     question = state.get("question", "")
     session_objects = state.get("session_objects", [])
@@ -126,8 +127,8 @@ def llm_node(state: GraphState) -> dict[str, Any]:
     session_summary_dict = session_summary.model_dump() if session_summary else {}
 
     if doc_only:
-        if not retrieved_docs:
-            answer = "No explicit definition was found in the retrieved documents."
+        if not retrieved_docs or not should_use_retrieved_for_doc_only(question, retrieved_docs):
+            answer = DOC_ONLY_EMPTY_MESSAGE
         else:
             answer = invoke_doc_only(question=question, retrieved_chunks=retrieved_docs)
     else:

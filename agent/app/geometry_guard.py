@@ -9,10 +9,10 @@ general rules (e.g. "what is meant by...", "according to the regulations").
 from __future__ import annotations
 
 # Phrases that indicate a GENERAL RULE / explanatory question → do NOT trigger guard (DOC_ONLY style)
+# Note: "would " removed as too broad; "would this property..." should trigger guard
 _GENERAL_RULE_PHRASES = (
     "what is meant by",
     "what is ",
-    "would ",
     "normally be permitted",
     "does the presence of",
     "restrict ",
@@ -26,6 +26,13 @@ _THIS_DRAWING_PHRASES = (
     "does this property",
     "is this plot",
     "in the current drawing",
+    "in this drawing",
+    "in this plan",
+    "in this session",
+    "for this property",
+    "for this plot",
+    "current session",
+    "my drawing",
     "given this drawing",
     "this drawing",
     "this property",

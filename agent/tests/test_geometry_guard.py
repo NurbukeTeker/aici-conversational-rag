@@ -19,13 +19,22 @@ class TestShouldTriggerGeometryGuard:
         assert should_trigger_geometry_guard("What is a highway?") is False
         assert should_trigger_geometry_guard("According to the regulations, does fronting apply?") is False
         assert should_trigger_geometry_guard("Generally, would this be permitted?") is False
-        assert should_trigger_geometry_guard("Would building here normally be permitted?") is False
+        assert should_trigger_geometry_guard("Would development normally be permitted?") is False
         assert should_trigger_geometry_guard("Does the presence of a wall restrict the front?") is False
+
+    def test_would_this_property_triggers(self):
+        """'Would this property front...' is about this drawing -> trigger guard."""
+        assert should_trigger_geometry_guard("Would this property front a highway?") is True
+
+    def test_would_normally_permitted_does_not_trigger(self):
+        """'Would development ... normally be permitted?' is general rule -> do not trigger."""
+        assert should_trigger_geometry_guard("Would development in front of the principal elevation normally be permitted?") is False
 
     def test_this_drawing_spatial_triggers(self):
         assert should_trigger_geometry_guard("Does this property front a highway?") is True
         assert should_trigger_geometry_guard("Is this plot adjacent to the highway?") is True
         assert should_trigger_geometry_guard("In the current drawing, does the plot front?") is True
+        assert should_trigger_geometry_guard("In this drawing, does the plot front?") is True
         assert should_trigger_geometry_guard("Given this drawing, is there fronting?") is True
 
     def test_spatial_but_not_about_this_drawing_does_not_trigger(self):

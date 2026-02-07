@@ -65,6 +65,17 @@ class TestIsJsonOnlyQuestion:
         assert is_json_only_question("What is the width of Main Road?") is True
         assert is_json_only_question("What is the height of the extension?") is True
 
+    def test_width_height_area_variants_json_only_true(self):
+        """Variants: how wide is X, what's the width of X, width of X, etc. -> JSON_ONLY."""
+        assert is_json_only_question("How wide is Main Road?") is True
+        assert is_json_only_question("What's the width of the extension?") is True
+        assert is_json_only_question("Width of the boundary?") is True
+        assert is_json_only_question("How tall is the wall?") is True
+        assert is_json_only_question("What's the height of the door?") is True
+        assert is_json_only_question("Height of the extension?") is True
+        assert is_json_only_question("What's the area of the plot?") is True
+        assert is_json_only_question("Area of this polygon?") is True
+
 
 class TestGetQueryMode:
     """Router: doc_only | json_only | hybrid."""

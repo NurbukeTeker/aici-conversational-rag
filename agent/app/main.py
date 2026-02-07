@@ -20,7 +20,8 @@ from .document_registry import DocumentRegistry
 from .sync_service import DocumentSyncService
 from .graph_lc import build_answer_graph, run_graph_until_route
 from .graph_lc import nodes as graph_nodes
-from .lc.chains import build_chains, astream_doc_only, astream_hybrid
+from .doc_only_guard import should_use_retrieved_for_doc_only
+from .lc.chains import DOC_ONLY_EMPTY_MESSAGE, build_chains, astream_doc_only, astream_hybrid
 
 # Configure logging
 logging.basicConfig(
@@ -263,8 +264,8 @@ async def _stream_answer_ndjson(request: AnswerRequest):
 
         full_answer_chunks = []
         if doc_only:
-            if not retrieved_docs:
-                override_msg = "No explicit definition was found in the retrieved documents."
+            if not retrieved_docs or not should_use_retrieved_for_doc_only(request.question, retrieved_docs):
+                override_msg = DOC_ONLY_EMPTY_MESSAGE
                 state["answer_text"] = override_msg
                 yield json.dumps({"t": "chunk", "c": override_msg}) + "\n"
             else:

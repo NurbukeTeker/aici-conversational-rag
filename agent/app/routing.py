@@ -42,6 +42,14 @@ _JSON_ONLY_PREFIXES = (
     "what is the height of ",
     "what is the area of ",
     "what is the name of ",
+    "how wide is ",
+    "what's the width of ",
+    "width of ",
+    "how tall is ",
+    "what's the height of ",
+    "height of ",
+    "what's the area of ",
+    "area of ",
 )
 _JSON_ONLY_PATTERNS = (
     " layers ",
@@ -70,6 +78,11 @@ def is_definition_only_question(question: str) -> bool:
         return False
     normalized = _normalize(question)
     if not normalized:
+        return False
+    # Object property from session (width/height/area/name of X) is not a definition question
+    if "what is the " in normalized and any(
+        p in normalized for p in ("width of ", "height of ", "area of ", "name of ")
+    ):
         return False
     for keyword in _DRAWING_INTENT_KEYWORDS:
         if keyword in normalized:
@@ -107,9 +120,14 @@ def is_json_only_question(question: str) -> bool:
         return True
     if "what layer" in normalized or "which layer" in normalized:
         return True
-    # Object property from drawing: "what is the width/height/area of X"
+    # Object property from drawing: "what is the width/height/area of X", "how wide is X", etc.
     if "what is the " in normalized and any(
         p in normalized for p in ("width of ", "height of ", "area of ", "name of ")
+    ):
+        return True
+    if any(
+        normalized.startswith(p)
+        for p in ("how wide is ", "what's the width of ", "width of ", "how tall is ", "what's the height of ", "height of ", "what's the area of ", "area of ")
     ):
         return True
     return False
