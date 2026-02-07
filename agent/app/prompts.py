@@ -14,13 +14,11 @@ Rules:
 
 4. If the question requires geometric computation and the JSON is insufficient (missing measurements, units, or reference points), explain what cannot be determined and what additional data is needed.
 
-5. When you cite regulations, reference them naturally in your answer text (e.g., "According to the Permitted Development Rights document...").
+5. When you cite regulations, quote short phrases (not long passages) and include the chunk/page reference provided.
 
-6. IMPORTANT: Your response should be a CLEAN, human-readable answer. Do NOT include any "Evidence:", "Sources:", or "References:" section in your answer. The system will automatically display source references separately.
+6. Provide a concise answer first, then a short "Evidence" section listing which retrieved excerpts and which objects/layers you used.
 
-7. If the user's JSON is malformed or inconsistent, request a corrected JSON and explain what is wrong.
-
-8. If the question is vague, off-topic, or not related to planning/drawing (e.g., "hello", "today is good", "what is the weather"), provide a helpful guidance response explaining what kinds of questions you can answer, with examples. Do NOT force irrelevant document citations for such questions."""
+7. If the user's JSON is malformed or inconsistent, request a corrected JSON and explain what is wrong."""
 
 
 USER_PROMPT_TEMPLATE = """User question:
@@ -39,20 +37,16 @@ Retrieved regulatory excerpts (persistent knowledge):
 {retrieved_chunks_formatted}
 
 Task:
-1. If the question is vague, casual, or unrelated to planning/development (e.g., greetings, weather, general chat), respond with a friendly guidance message explaining what you can help with, and provide 2-3 example questions. DO NOT cite any documents for such questions.
+1. Answer the user question using BOTH the retrieved excerpts and the current JSON.
+2. If the answer depends on geometry (e.g., "fronts a highway"), reason from the JSON objects and explain your reasoning steps briefly.
+3. If the rule depends on terms (e.g., "principal elevation", "highway"), prefer definitions in the retrieved excerpts.
 
-2. If the question IS about planning, development, or the drawing:
-   - Answer using BOTH the retrieved excerpts and the current JSON.
-   - If the answer depends on geometry (e.g., "fronts a highway"), reason from the JSON objects briefly.
-   - If the rule depends on terms (e.g., "principal elevation", "highway"), prefer definitions from the retrieved excerpts.
-   - Reference document information naturally within your answer text.
-
-CRITICAL OUTPUT FORMAT:
-- Provide ONLY the answer text. 
-- Do NOT include any "Evidence:", "Sources:", "References:", or similar sections.
-- Do NOT list chunk IDs or page numbers as a separate section.
-- The system will automatically display sources separately based on metadata.
-- Keep your answer clean, direct, and human-readable."""
+Return:
+- Final answer (short, direct)
+- Evidence:
+  - Document excerpts used (chunk id + page)
+  - JSON objects/layers used (layer names + indices)
+- If uncertain, clearly state uncertainty and what additional data would resolve it."""
 
 
 def format_chunk(chunk_id: str, source: str, page: str | None, section: str | None, text: str) -> str:
