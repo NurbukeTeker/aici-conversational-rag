@@ -155,6 +155,7 @@ Evaluators can use these to validate behavior:
 - **Evidence returned:** Enables auditable answers; UI shows which document chunks and which JSON layers were used.
 - **Session summary:** Reduces token usage and noise while preserving layer counts and key flags (e.g. plot boundary, highways present).
 - **Embedding model:** ChromaDB default is used; the pipeline can be swapped to another embedding model by configuring ChromaDB or replacing the vector store implementation.
+- **LangChain usage:** Limited to `ChatOpenAI` (LLM calls) and `RecursiveCharacterTextSplitter` (PDF chunking). No LangGraph, chains, or agents.
 
 ---
 

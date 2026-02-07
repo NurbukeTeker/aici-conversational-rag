@@ -1,25 +1,13 @@
-# Agent Service - SOTA Dependencies (2026)
+# Agent Service
 fastapi>=0.115.0
 uvicorn[standard]>=0.32.0
 pydantic>=2.10.0
 pydantic-settings>=2.6.0
-
-# OpenAI & LLM
 openai>=1.58.0
 tiktoken>=0.8.0
-
-# LangChain (latest stable)
-langchain>=0.3.0
 langchain-core>=0.3.0
 langchain-openai>=0.2.0
-langchain-community>=0.3.0
 langchain-text-splitters>=0.3.0
-
-# Vector Store
 chromadb>=0.5.0
-
-# PDF Processing
 pypdf>=5.1.0
-
-# Testing
 pytest>=8.3.0
