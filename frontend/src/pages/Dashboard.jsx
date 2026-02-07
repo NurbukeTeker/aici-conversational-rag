@@ -12,12 +12,63 @@ function getWsQaUrl() {
   return `${protocol}//${host}/api/ws/qa?token=${encodeURIComponent(token)}`;
 }
 
-/** Strip the in-text "Evidence:" subsection so only the narrative is shown; evidence lives in the dedicated panel. */
-function stripEvidenceFromAnswer(text) {
+
+/**
+ * Parse LLM answer: keep only the narrative; remove Evidence section and everything after.
+ * Evidence is shown in the dedicated Evidence panel from API.
+ */
+function parseAnswerNarrative(text) {
   if (!text || typeof text !== 'string') return text ?? '';
-  const match = text.match(/\n\s*(-\s*)?Evidence\s*:/i);
-  if (!match) return text.trim();
-  return text.slice(0, text.indexOf(match[0])).trim();
+  const lower = text.toLowerCase();
+  // Find start of Evidence block (take earliest match)
+  const patterns = [
+    '**evidence**',
+    '\nevidence:',
+    '\nevidence\n',
+    '\n**document excerpts used:**',
+    '\ndocument excerpts used:',
+    '\n**json objects/layers used:**',
+    '\njson objects/layers used:',
+  ];
+  let cut = -1;
+  for (const p of patterns) {
+    const i = lower.indexOf(p);
+    if (i >= 0 && (cut < 0 || i < cut)) cut = i;
+  }
+  if (cut >= 0) text = text.slice(0, cut);
+  // Strip trailing Evidence markers
+  text = text.replace(/\s*\*\*Evidence\s*\*\*:?\s*$/gim, '').trim();
+  return text.trim();
+}
+
+/** Typing effect: reveals text character by character for completed answers. */
+function TypingText({ text, speed = 12, showCursor = true }) {
+  const [displayedLength, setDisplayedLength] = useState(0);
+
+  useEffect(() => {
+    if (!text) {
+      setDisplayedLength(0);
+      return;
+    }
+    setDisplayedLength(0);
+    const len = text.length;
+    let n = 0;
+    const id = setInterval(() => {
+      n += 1;
+      setDisplayedLength(Math.min(n, len));
+      if (n >= len) clearInterval(id);
+    }, speed);
+    return () => clearInterval(id);
+  }, [text, speed]);
+
+  const displayed = (text ?? '').slice(0, displayedLength);
+  const isComplete = displayedLength >= (text?.length ?? 0);
+  return (
+    <>
+      {displayed}
+      {showCursor && !isComplete && <span className="qa-streaming-cursor">▌</span>}
+    </>
+  );
 }
 
 // Sample drawing objects from the specification
@@ -50,12 +101,24 @@ function Dashboard() {
   const isNearBottomRef = useRef(true);
   const lastMessageRef = useRef(null);
   const prevMessagesLengthRef = useRef(0);
+  const prevLastWasStreamingRef = useRef(false);
   const SCROLL_THRESHOLD_PX = 80;
   
   // Export state
   const [exportingExcel, setExportingExcel] = useState(false);
   const [exportingJson, setExportingJson] = useState(false);
   const [exportMessage, setExportMessage] = useState(null);
+
+  // Collapsible evidence: Set of message ids where evidence is collapsed
+  const [collapsedEvidenceIds, setCollapsedEvidenceIds] = useState(() => new Set());
+  const toggleEvidence = (msgId) => {
+    setCollapsedEvidenceIds(prev => {
+      const next = new Set(prev);
+      if (next.has(msgId)) next.delete(msgId);
+      else next.add(msgId);
+      return next;
+    });
+  };
 
   // Load session objects on mount
   useEffect(() => {
@@ -86,16 +149,32 @@ function Dashboard() {
     isNearBottomRef.current = scrollHeight - scrollTop - clientHeight <= SCROLL_THRESHOLD_PX;
   };
 
-  // When a new question is added, scroll so that question is at top of viewport
+  // Scroll to latest when: new question added, or last answer completes (evidence appears)
   useEffect(() => {
-    const len = messages.length;
-    if (len > prevMessagesLengthRef.current && len > 0) {
-      lastMessageRef.current?.scrollIntoView({ block: "start" });
-    }
-    prevMessagesLengthRef.current = len;
-  }, [messages.length]);
+    const el = qaMessagesRef.current;
+    if (!el || messages.length === 0) return;
 
-  // During streaming: scroll to bottom only if user is already near bottom
+    const len = messages.length;
+    const lastMsg = messages[len - 1];
+    const isNewMessage = len > prevMessagesLengthRef.current;
+    const lastWasStreaming = prevLastWasStreamingRef.current;
+    const lastJustFinished = lastWasStreaming && !lastMsg?.streaming;
+
+    if (isNewMessage || lastJustFinished) {
+      // New question or answer just completed — scroll to bottom to show latest content
+      isNearBottomRef.current = true;
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          el.scrollTop = el.scrollHeight - el.clientHeight;
+        });
+      });
+    }
+
+    prevMessagesLengthRef.current = len;
+    prevLastWasStreamingRef.current = !!lastMsg?.streaming;
+  }, [messages]);
+
+  // During streaming: keep scrolling to bottom if user is following along
   useEffect(() => {
     if (!qaMessagesRef.current || !isNearBottomRef.current) return;
     const el = qaMessagesRef.current;
@@ -195,6 +274,11 @@ function Dashboard() {
             setAsking(false);
           } else if (data.t === 'error') {
             ws.removeEventListener('message', handler);
+            const msg = (data.message || '').toLowerCase();
+            if (msg.includes('credentials') || msg.includes('unauthorized')) {
+              logout();
+              return;
+            }
             setMessages(prev => prev.map(m =>
               m.id === msgId
                 ? { ...m, answer: `Error: ${data.message || 'Stream failed'}`, evidence: null, streaming: false }
@@ -223,6 +307,10 @@ function Dashboard() {
         sessionSummary: response.session_summary
       }]);
     } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        logout();
+        return;
+      }
       setMessages(prev => [...prev, {
         id: msgId,
         question: currentQuestion,
@@ -398,7 +486,7 @@ function Dashboard() {
               </svg>
               Drawing Objects (JSON)
             </div>
-            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+            <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
               {getObjectCount()} objects
             </span>
           </div>
@@ -485,6 +573,14 @@ function Dashboard() {
               className="qa-messages"
               onScroll={handleQaMessagesScroll}
             >
+              {asking && !messages.some(m => m.streaming) && (
+                <div className="qa-message">
+                  <div className="qa-answer" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    <span className="spinner" />
+                    <span>Thinking...</span>
+                  </div>
+                </div>
+              )}
               {messages.length === 0 ? (
                 <div className="qa-empty">
                   <div className="qa-empty-icon">💬</div>
@@ -506,55 +602,84 @@ function Dashboard() {
                     </div>
                     <div className="qa-answer">
                       <div className="qa-answer-text">
-                        {(() => {
-                          const narrative = stripEvidenceFromAnswer(msg.streaming ? streamingAnswer : msg.answer);
-                          const showBridging = msg.evidence && !msg.streaming;
-                          return (
-                            <>
-                              {narrative}
-                              {showBridging && (
-                                <>
-                                  {narrative ? '\n\n' : ''}
-                                  Relevant documents and JSON layers used are listed in the Evidence section below.
-                                </>
-                              )}
-                              {msg.streaming && !streamingAnswer && <span className="qa-streaming-cursor">▌</span>}
-                            </>
-                          );
-                        })()}
+                        {msg.streaming ? (
+                          <>
+                            {parseAnswerNarrative(streamingAnswer)}
+                            <span className="qa-streaming-cursor">▌</span>
+                          </>
+                        ) : (
+                          <TypingText text={parseAnswerNarrative(msg.answer)} />
+                        )}
                       </div>
 
                       {msg.evidence && !msg.streaming && (
-                        <details className="qa-evidence" open>
-                          <summary className="qa-evidence-title">Evidence</summary>
+                        <div className="qa-evidence">
+                          <div
+                            className="qa-evidence-title"
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => toggleEvidence(msg.id)}
+                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleEvidence(msg.id); } }}
+                            aria-expanded={!collapsedEvidenceIds.has(msg.id)}
+                          >
+                            <span className="qa-evidence-chevron" aria-hidden>
+                              {collapsedEvidenceIds.has(msg.id) ? '▶' : '▼'}
+                            </span>
+                            <strong>Evidence:</strong>
+                          </div>
+                          {!collapsedEvidenceIds.has(msg.id) && (
+                            <>
                           {msg.evidence.document_chunks?.length > 0 && (
-                            <div>
-                              {msg.evidence.document_chunks.slice(0, 3).map((chunk, i) => (
-                                <div key={i} className="qa-evidence-item">
-                                  📄 {chunk.source} (p{chunk.page || '?'}) - {chunk.section || 'general'}
-                                </div>
-                              ))}
-                            </div>
+                            <>
+                              <div className="qa-evidence-subtitle"><strong>Document Excerpts Used:</strong></div>
+                              <ul className="qa-evidence-list">
+                                {msg.evidence.document_chunks.map((chunk, i) => (
+                                  <li key={i} className="qa-evidence-item">
+                                    [{chunk.chunk_id || chunk.source} | p{chunk.page || '?'}]: {chunk.text_snippet || `${chunk.section || 'general'}`}
+                                  </li>
+                                ))}
+                              </ul>
+                            </>
                           )}
-                          {msg.evidence.session_objects && (
-                            <div className="qa-evidence-item">
-                              🏠 Layers: {msg.evidence.session_objects.layers_used.join(', ')}
-                            </div>
+                          {msg.evidence.session_objects && (() => {
+                            const so = msg.evidence.session_objects;
+                            const labels = so.object_labels || [];
+                            const indices = so.object_indices || [];
+                            const layers = so.layers_used || [];
+                            const byLayer = {};
+                            layers.forEach((layer, i) => {
+                              if (!byLayer[layer]) byLayer[layer] = { indices: [], labels: [] };
+                              byLayer[layer].indices.push(indices[i]);
+                              byLayer[layer].labels.push(labels[i]);
+                            });
+                            return (
+                              <>
+                                <div className="qa-evidence-subtitle"><strong>JSON Objects/Layers Used:</strong></div>
+                                <ul className="qa-evidence-list">
+                                  {Object.entries(byLayer).map(([layer, { indices: idxs, labels: lbs }]) => {
+                                    const indexStr = idxs.length <= 2
+                                      ? idxs.join(' and ')
+                                      : idxs.slice(0, -1).join(', ') + ' and ' + idxs[idxs.length - 1];
+                                    const labelPart = lbs.some(Boolean)
+                                      ? ` (for ${lbs.filter(Boolean).map((l) => `"${l}"`).join(' and ')})`
+                                      : '';
+                                    return (
+                                      <li key={layer} className="qa-evidence-item">
+                                        {layer} layer, indices {indexStr}{labelPart}.
+                                      </li>
+                                    );
+                                  })}
+                                </ul>
+                              </>
+                            );
+                          })()}
+                            </>
                           )}
-                        </details>
+                        </div>
                       )}
                     </div>
                   </div>
                 ))
-              )}
-              
-              {asking && !messages.some(m => m.streaming) && (
-                <div className="qa-message">
-                  <div className="qa-answer" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                    <span className="spinner" />
-                    <span>Thinking...</span>
-                  </div>
-                </div>
               )}
             </div>
 

@@ -526,7 +526,6 @@ async def ask_question(
                 )
             
             agent_response = response.json()
-            
             return QAResponse(**agent_response)
             
     except httpx.RequestError as e:

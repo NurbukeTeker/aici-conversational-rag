@@ -14,9 +14,9 @@ Rules:
 
 4. If the question requires geometric computation and the JSON is insufficient (missing measurements, units, or reference points), explain what cannot be determined and what additional data is needed.
 
-5. When you cite regulations, quote short phrases (not long passages) and include the chunk/page reference provided.
+5. When you cite regulations, quote short phrases (not long passages). Do NOT include inline document references (e.g. [DocName_016_0032 | p16]) in your answer — the Evidence panel below shows these.
 
-6. Provide a concise answer first, then a short "Evidence" section listing which retrieved excerpts and which objects/layers you used.
+6. Return ONLY your direct answer. No "Evidence:" section, no inline document excerpts. End your answer with exactly: "Relevant documents and JSON layers used are listed in the Evidence section below."
 
 7. If the user's JSON is malformed or inconsistent, request a corrected JSON and explain what is wrong."""
 
@@ -41,12 +41,11 @@ Task:
 2. If the answer depends on geometry (e.g., "fronts a highway"), reason from the JSON objects and explain your reasoning steps briefly.
 3. If the rule depends on terms (e.g., "principal elevation", "highway"), prefer definitions in the retrieved excerpts.
 
-Return:
-- Final answer (short, direct)
-- Evidence:
-  - Document excerpts used (chunk id + page)
-  - JSON objects/layers used (layer names + indices)
-- If uncertain, clearly state uncertainty and what additional data would resolve it."""
+Return ONLY your direct answer:
+- One or two paragraphs: your direct answer (short, direct).
+- Do NOT include any inline document references (e.g. [DocName_016_0032 | p16]) — the Evidence panel shows them.
+- If uncertain, state uncertainty and what additional data would resolve it.
+- End with exactly: "Relevant documents and JSON layers used are listed in the Evidence section below." """
 
 
 def format_chunk(chunk_id: str, source: str, page: str | None, section: str | None, text: str) -> str:

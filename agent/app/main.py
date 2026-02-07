@@ -211,6 +211,14 @@ async def answer_question(request: AnswerRequest):
             request.session_objects,
             request.question
         )
+        object_labels = []
+        if request.session_objects and indices_used:
+            for i in indices_used:
+                if 0 <= i < len(request.session_objects):
+                    name = (request.session_objects[i].get("properties") or {}).get("name", "")
+                    object_labels.append(str(name) if name else "")
+                else:
+                    object_labels.append("")
         
         # Build evidence
         chunk_evidence = [
@@ -225,8 +233,9 @@ async def answer_question(request: AnswerRequest):
         ]
         
         object_evidence = ObjectEvidence(
-            layers_used=list(set(layers_used)),
-            object_indices=indices_used
+            layers_used=layers_used,
+            object_indices=indices_used,
+            object_labels=object_labels
         ) if layers_used else None
         
         return AnswerResponse(
@@ -285,8 +294,16 @@ async def _stream_answer_ndjson(request: AnswerRequest):
             }
             for c in retrieved_chunks
         ]
+        object_labels = []
+        if request.session_objects and indices_used:
+            for i in indices_used:
+                if 0 <= i < len(request.session_objects):
+                    name = (request.session_objects[i].get("properties") or {}).get("name", "")
+                    object_labels.append(str(name) if name else "")
+                else:
+                    object_labels.append("")
         object_evidence = (
-            {"layers_used": list(set(layers_used)), "object_indices": indices_used}
+            {"layers_used": layers_used, "object_indices": indices_used, "object_labels": object_labels}
             if layers_used else None
         )
         done_payload = {

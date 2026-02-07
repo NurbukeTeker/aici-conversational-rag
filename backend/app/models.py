@@ -306,6 +306,7 @@ class ObjectEvidence(BaseModel):
     """Evidence from session objects."""
     layers_used: list[str]
     object_indices: list[int]
+    object_labels: list[str] = Field(default_factory=list, description="Optional names from properties.name per index")
 
 
 class Evidence(BaseModel):

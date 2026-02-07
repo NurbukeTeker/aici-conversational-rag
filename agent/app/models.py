@@ -1,4 +1,4 @@
-﻿"""Pydantic models for Agent service."""
+"""Pydantic models for Agent service."""
 from pydantic import BaseModel, Field
 from typing import Any
 
@@ -41,6 +41,7 @@ class ObjectEvidence(BaseModel):
     """Evidence from session objects."""
     layers_used: list[str]
     object_indices: list[int]
+    object_labels: list[str] = Field(default_factory=list, description="Optional names from properties.name per index")
 
 
 class Evidence(BaseModel):
