@@ -42,7 +42,7 @@ This project implements a **hybrid Retrieval-Augmented Generation (RAG)** system
 
 - PDFs are **pre-ingested** (on agent startup or via `/ingest`). Text is extracted (pypdf), chunked with **RecursiveCharacterTextSplitter** (chunk size 1000, overlap 200), and stored in **ChromaDB** with metadata (source, page, section).
 - **Document embeddings** are created during ingestion and **remain fixed throughout user sessions.** They are never modified mid-session.
-- Embedding: ChromaDB default (e.g. all-MiniLM-L6-v2). Vector store is shared and read-only for Q&A.
+- ChromaDB is configured with its default sentence-transformer embedding (e.g. all-MiniLM-L6-v2). Vector store is shared and read-only for Q&A.
 
 ### 3.2 Ephemeral Session Objects
 
@@ -86,6 +86,7 @@ This project implements a **hybrid Retrieval-Augmented Generation (RAG)** system
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
+| POST | `/auth/register` | Register a new user |
 | POST | `/auth/login` | Login and get JWT token |
 | PUT | `/session/objects` | Update session JSON objects |
 | GET | `/session/objects` | Get current session objects |
