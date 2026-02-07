@@ -7,7 +7,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
-from .database import User, get_database
+from .database import User
 from .auth import get_password_hash, verify_password
 from .validators import (
     password_validator, username_validator, email_validator,

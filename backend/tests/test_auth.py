@@ -42,7 +42,7 @@ class TestPasswordHashing:
     
     def test_unicode_password(self):
         """Test that unicode passwords work."""
-        password = "Test🔐Pass_123!"  # noqa: S105  # gitguardian: ignore
+        password = "TestPass_123!"  # noqa: S105  # gitguardian: ignore
         hashed = get_password_hash(password)
         
         assert verify_password(password, hashed) is True

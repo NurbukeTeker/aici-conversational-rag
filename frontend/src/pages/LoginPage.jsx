@@ -254,11 +254,11 @@ function LoginPage() {
     }
     
     if (v.available === true) {
-      return <span className="field-status available">✓ Available</span>;
+      return <span className="field-status available">Available</span>;
     }
     
     if (v.available === false) {
-      return <span className="field-status unavailable">✗ {v.message || 'Not available'}</span>;
+      return <span className="field-status unavailable">{v.message || 'Not available'}</span>;
     }
     
     return null;
@@ -312,7 +312,7 @@ function LoginPage() {
                   <span className="field-status checking">Checking...</span>
                 )}
                 {mode === 'register' && validation.username.available === true && (
-                  <span className="field-status available">✓ Available</span>
+                  <span className="field-status available">Available</span>
                 )}
               </div>
               {mode === 'register' && formData.username && !/^[a-zA-Z][a-zA-Z0-9_]*$/.test(formData.username) && validation.username.available !== false && (
@@ -358,7 +358,7 @@ function LoginPage() {
                     <span className="field-status checking">Checking...</span>
                   )}
                   {validation.email.available === true && (
-                    <span className="field-status available">✓</span>
+                    <span className="field-status available">OK</span>
                   )}
                 </div>
                 {formData.email && !formData.email.includes('@') && (

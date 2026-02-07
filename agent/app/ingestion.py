@@ -1,5 +1,4 @@
 """PDF ingestion and chunking service."""
-import os
 import logging
 from pathlib import Path
 from typing import Generator

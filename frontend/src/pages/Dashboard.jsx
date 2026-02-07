@@ -533,14 +533,14 @@ function Dashboard() {
           <div className="panel-footer">
             <div className="flex justify-between items-center">
               <div className={`json-status ${jsonValid ? 'valid' : 'invalid'}`}>
-                {jsonValid ? '✓ Valid JSON' : `✗ ${jsonError}`}
+                {jsonValid ? 'Valid JSON' : `Invalid: ${jsonError}`}
               </div>
               <button
                 className="btn-primary"
                 onClick={handleSaveSession}
                 disabled={!jsonValid || saving}
               >
-                {saving ? 'Saving...' : sessionSaved ? '✓ Saved' : 'Update Session'}
+                {saving ? 'Saving...' : sessionSaved ? 'Saved' : 'Update Session'}
               </button>
             </div>
           </div>
@@ -605,7 +605,7 @@ function Dashboard() {
             >
               {messages.length === 0 ? (
                 <div className="qa-empty">
-                  <div className="qa-empty-icon">💬</div>
+                  <div className="qa-empty-icon" aria-hidden>Q&A</div>
                   <p>Ask questions about your drawing and planning regulations.</p>
                   <p style={{ fontSize: '0.85rem', marginTop: '0.5rem' }}>
                     Example: "Does this property front a highway?"

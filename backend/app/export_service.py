@@ -71,7 +71,7 @@ class ExportService:
                 if ev.get("document_chunks"):
                     chunks = ev["document_chunks"][:5]  # Max 5 chunks
                     evidence_text = "\n".join([
-                        f"• {c.get('source', 'Unknown')} (p{c.get('page', '?')}) - {c.get('section', 'general')}"
+                        f"- {c.get('source', 'Unknown')} (p{c.get('page', '?')}) - {c.get('section', 'general')}"
                         for c in chunks
                     ])
             

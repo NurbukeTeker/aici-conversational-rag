@@ -3,13 +3,6 @@ from pydantic import BaseModel, Field
 from typing import Any
 
 
-class DrawingObject(BaseModel):
-    """A single drawing object from the session JSON."""
-    layer: str = Field(..., description="Layer name (e.g., Highway, Walls, Doors)")
-    type: str = Field(default="unknown", description="Object type")
-    properties: dict[str, Any] = Field(default_factory=dict, description="Object properties")
-
-
 class SessionSummary(BaseModel):
     """Computed summary of session objects for reasoning."""
     layer_counts: dict[str, int] = Field(default_factory=dict)

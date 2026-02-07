@@ -1,26 +1,12 @@
 # AICI Hybrid RAG Challenge
 
-A hybrid Retrieval-Augmented Generation system that combines **persistent knowledge** from planning/regulatory PDF documents with **ephemeral session state** (drawing objects in JSON) to answer user questions with grounded, auditable responses.
+## 1. Project Overview
 
-## 🎯 What This System Does
+This project implements a **hybrid Retrieval-Augmented Generation (RAG)** system that answers questions by combining **persistent document embeddings** with **session-specific structured drawing objects** provided as JSON. Persistent knowledge is stored in a vector database; ephemeral objects are maintained per user session and injected into each query at runtime. The **Agent is stateless**: it receives question + session JSON on every request and does not store session state.
 
-1. **Persistent Knowledge**: PDF documents (e.g., UK Permitted Development Rights) are embedded into a ChromaDB vector database once
-2. **Ephemeral State**: Each user's drawing objects (JSON) are stored in Redis per session — NOT embedded
-3. **Hybrid Answers**: Questions are answered by retrieving relevant PDF rules AND reasoning over the current JSON state
-4. **Multi-User Isolation**: Each user has their own session; same question + different JSON = different answer
+---
 
-## Mapping to Challenge Requirements
-
-| Challenge Requirement | Implementation |
-|----------------------|----------------|
-| Persistent knowledge | PDF embeddings stored in ChromaDB (fixed, global) |
-| Ephemeral state | User-scoped JSON in Redis (per session, not embedded) |
-| Hybrid reasoning | Agent prompt combines retrieved chunks + current JSON |
-| Multi-user sessions | JWT authentication + Redis keys scoped by user_id |
-| Modular system | Frontend + Backend + Agent as separate services |
-| Real-time communication | WebSocket for streaming Q&A; each request uses latest session state |
-
-## Architecture
+## 2. Architecture Overview
 
 ```
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
@@ -36,254 +22,183 @@ A hybrid Retrieval-Augmented Generation system that combines **persistent knowle
                         └─────────────────┘     └─────────────────┘
 ```
 
-### Services
+**Components and responsibilities:**
 
-| Service | Port | Description |
-|---------|------|-------------|
-| Frontend | 3000 | React app with login, JSON editor, Q&A interface |
-| Backend | 8000 | JWT auth, Redis session management, QA orchestration |
-| Agent | 8001 | PDF ingestion, vector store, hybrid RAG pipeline |
-| Redis | 6379 | Ephemeral session storage (user-scoped JSON) |
+- **Frontend (React):** Question input, JSON editor for drawing objects, answer and evidence display, login/register.
+- **Backend (FastAPI):**
+  - **Owns auth + session.** JWT authentication; session management in Redis with TTL.
+  - Forwards **question + latest session objects** to the Agent on every Q&A request.
+- **Agent (FastAPI):**
+  - **Stateless.** No session storage; receives question and session JSON from the backend each time.
+  - Hybrid RAG: vector retrieval from ChromaDB, single-step LLM reasoning over docs + session JSON.
+- **Redis:** Ephemeral session storage (user-scoped JSON). **Ephemeral objects are never embedded.**
+- **ChromaDB:** Persistent document embeddings only.
 
-## Quick Start
+---
 
-### Prerequisites
+## 3. Data Model & Knowledge Separation
 
-- Docker & Docker Compose
-- OpenAI API Key
+### 3.1 Persistent Knowledge
 
-### Setup
+- PDFs are **pre-ingested** (on agent startup or via `/ingest`). Text is extracted (pypdf), chunked with **RecursiveCharacterTextSplitter** (chunk size 1000, overlap 200), and stored in **ChromaDB** with metadata (source, page, section).
+- **Document embeddings** are created during ingestion and **remain fixed throughout user sessions.** They are never modified mid-session.
+- Embedding: ChromaDB default (e.g. all-MiniLM-L6-v2). Vector store is shared and read-only for Q&A.
 
-1. **Clone the repository:**
-```bash
-git clone https://github.com/NurbukeTeker/aici-conversational-rag.git
-cd aici-conversational-rag
-```
+### 3.2 Ephemeral Session Objects
 
-2. **Create environment file:**
-```bash
-cp env.example .env
-# Edit .env and add your OPENAI_API_KEY
-```
+- The **JSON object list is session-scoped**: stored in **Redis** with a TTL (e.g. 1 hour). It can be **updated between queries** (PUT `/session/objects`). The backend **retrieves the latest session state from Redis for every query** and passes it to the Agent.
+- **Session objects are not embedded and are not stored in the vector database.** They are sent in full (or summarized) in the LLM prompt.
+- TTL is refreshed on each session update. If the session is empty or expired, the backend sends an empty list; the Agent can still answer using only document knowledge (e.g. definition-only questions).
 
-3. **Place PDF documents in `data/pdfs/` directory**
-   - Example: UK Permitted Development Rights PDF
+---
 
-4. **Start all services:**
-```bash
-docker-compose up --build
-```
+## 4. Hybrid RAG Reasoning Flow
 
-5. **Access the application:**
-   - Frontend: http://localhost:3000
-   - Backend API Docs: http://localhost:8000/docs
-   - Agent API Docs: http://localhost:8001/docs
+1. User submits a question (frontend).
+2. Backend loads **latest session objects from Redis** for the authenticated user.
+3. Backend sends `{ question, session_objects }` to the Agent.
+4. Agent retrieves **relevant document chunks** from ChromaDB (semantic search, top-k).
+5. Agent constructs a **single prompt** containing:
+   - system instructions (docs authoritative, JSON ground truth, no hallucination);
+   - user question;
+   - retrieved document excerpts;
+   - current session object list (pretty-printed);
+   - session summary (layer counts, flags).
+6. **LLM generates the answer** in one reasoning step.
+7. **Evidence** (document chunks used, session layers/indices used) is returned with the answer.
 
-> **Note on PDF Ingestion:** PDF ingestion runs automatically on agent startup if the vector store is empty. The `/ingest` endpoint is provided for manual re-indexing during development.
+**The LLM receives both persistent document excerpts and ephemeral session objects in one reasoning step, ensuring answers reflect the current session state.**
 
-## Example Queries
+---
 
-Try these questions with the sample JSON (pre-filled in the frontend):
+## 5. Prompt Design
 
-| Question | What It Tests |
-|----------|---------------|
-| "Does this property front a highway?" | Checks `Highway` layer in JSON + PDF definition of "highway" |
-| "What are the rules for rear extensions?" | Retrieves Class A rules from PDF |
-| "Can I build an extension beyond the rear wall?" | Combines PDF rules with `Walls` layer analysis |
-| "What permitted development rights apply to this plot?" | Uses `Plot Boundary` + PDF Class rules |
-| "Is a planning application required for a new door?" | Checks `Doors` layer + PDF conditions |
+- **System prompt** enforces: retrieved documents are authoritative; JSON is ground truth for the drawing; no inventing objects or rules; cite short phrases; end with the Evidence sentence; do not infer when geometry is missing.
+- **User prompt** includes: question, pretty-printed session JSON, session summary (layer counts, plot boundary present, highways present, limitations), and retrieved regulatory excerpts. A **session summary** reduces prompt noise while keeping presence/context.
+- **Doc-only routing:** For definition-style questions (e.g. “What is the definition of a highway?”), the Agent uses a **doc-only** prompt (question + retrieved chunks only, no session JSON/summary). For hybrid questions (e.g. “Does this property front a highway?”), the full prompt with JSON and summary is used.
+- **Evidence** is required: the model is instructed to end with a fixed sentence; the API returns structured evidence (document chunks + session layers/indices) for the UI.
 
-### Example: What the Agent Sees
+---
 
-When you ask "Does this property front a highway?", the agent receives:
+## 6. API Overview (Key Endpoints)
 
-```
-Question: "Does this property front a highway?"
-
-Session JSON layers: Highway (2), Plot Boundary (1), Walls (2), Doors (1), Windows (1)
-
-Retrieved document excerpt:
-[DOC: permitted_development.pdf | p6 | chunk: general_issues_highway]
-"Highway" - is a public right of way such as a public road, public footpath 
-and bridleway. For the purposes of the Order it also includes unadopted 
-streets or private ways.
-
-→ Agent reasons: JSON contains "Highway" layer → property fronts a highway
-```
-
-## API Endpoints
-
-### Backend (Port 8000)
+**Backend (Port 8000)**
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/auth/register` | Register new user |
 | POST | `/auth/login` | Login and get JWT token |
 | PUT | `/session/objects` | Update session JSON objects |
 | GET | `/session/objects` | Get current session objects |
-| POST | `/qa` | Ask a question (hybrid RAG, non-streaming) |
-| WebSocket | `/ws/qa` | Real-time Q&A with streaming answers (token in query) |
-| GET | `/health` | Health check |
+| POST | `/qa` | Ask a question (hybrid RAG) |
+| WebSocket | `/ws/qa` | Streaming Q&A (token in query) |
 
-### Agent (Port 8001)
+**Agent (Port 8001)**
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/answer` | Process question with hybrid RAG (full response) |
-| POST | `/answer/stream` | Same as `/answer` but streams response as NDJSON |
-| POST | `/ingest` | Manually trigger PDF re-ingestion |
-| GET | `/health` | Health check (includes vector store status) |
+| POST | `/answer` | Hybrid RAG (full response) |
+| POST | `/answer/stream` | Same, streamed as NDJSON |
+| POST | `/ingest` | Trigger PDF re-ingestion |
+| GET | `/health` | Health and vector store status |
 
-## Security Considerations
+---
 
-| Aspect | Implementation |
-|--------|----------------|
-| Authentication | JWT tokens with configurable expiry (default: 60 min) |
-| Token refresh | Not implemented (out of scope for challenge) |
-| User isolation | Redis keys scoped by `session:{user_id}:objects` |
-| Secrets | Stored in `.env` file (git-ignored) |
-| CORS | Configured for frontend origin |
+## 7. Running the System Locally (Quickstart)
 
-## Design Decisions
+**Under 2 minutes:**
 
-### Why JSON is NOT Embedded in Vector DB
+```bash
+git clone https://github.com/NurbukeTeker/aici-conversational-rag.git
+cd aici-conversational-rag
 
-The drawing JSON is stored in Redis, **not** ChromaDB:
-- JSON changes frequently during a session
-- Re-embedding on every edit is expensive and slow
-- JSON is small enough to include directly in LLM prompts
-- Multi-user isolation requires user-scoped storage
+cp env.example .env
+# Add OPENAI_API_KEY (required) and optionally JWT_SECRET_KEY
 
-### Why Retrieval is in the Agent Service
+docker compose up --build
+```
 
-Vector search happens inside the Agent:
-- Agent owns the knowledge base (single responsibility)
-- Reduces network roundtrips
-- Cleaner separation: Backend = auth/sessions, Agent = AI
+- **Frontend:** http://localhost:3000  
+- **Flow:** Register → paste/edit JSON in the editor → **Update Session** → ask questions. Answers and evidence appear in the Q&A panel.
 
-### Real-time Communication
+Place PDFs in `data/pdfs/` before or after first run; ingestion runs on agent startup.
 
-The backend supports **real-time communication** with the AI Agent as required by the challenge:
-- **WebSocket** (`/ws/qa`): The frontend opens a WebSocket (with JWT in query). Questions are sent over the socket; the backend streams the Agent’s answer back token-by-token so the user sees the response as it is generated.
-- **REST** (`POST /qa`): Still available; the frontend falls back to it if the WebSocket is unavailable. Each request uses the latest session state.
-- Communication with the Agent uses the current session state on every request; streaming is implemented via the Agent’s `/answer/stream` endpoint, which the backend proxies to the client.
+---
 
-### Performance Optimization
+## 8. Example Queries
 
-To reduce token usage, a lightweight session summary (layer counts, presence flags) is computed on JSON update and included in prompts. This avoids sending the full JSON for simple presence checks.
+Evaluators can use these to validate behavior:
 
-## Project Structure
+| Type | Example query | What to expect |
+|------|----------------|----------------|
+| **Doc-only** | “What is the definition of a highway?” | Answer from PDF only; no session JSON in prompt. |
+| **JSON-only** | “How many Highway objects are in the current drawing?” | Answer from session JSON (layer counts). |
+| **Hybrid** | “Does this property front a highway?” | Answer combines PDF definition of “highway” and presence of Highway/Plot Boundary in JSON. |
+| **Update session** | Modify JSON (e.g. remove Highway layer), ask the same hybrid question again. | Answer **changes** (e.g. from “yes” to “no” or “cannot determine”) because session state changed. |
+
+---
+
+## 9. Error Handling & Edge Cases
+
+- **Invalid JSON:** Frontend validates before save; backend returns 422 with field-level details and an example payload. Large payloads are rejected (e.g. 512 KB / 1000 objects limit).
+- **Missing geometry guard:** For spatial questions (e.g. “Does this property front a highway?”), if required layers (e.g. Highway, Plot Boundary) exist but **all** objects lack geometry, the Agent returns a deterministic message (“Cannot determine… drawing does not provide geometric information for: …”) without calling the LLM.
+- **Smalltalk routing:** Short greetings (e.g. “Hi”, “Thanks”) are detected and answered with a fixed friendly reply; no retrieval or LLM call.
+- **Empty session:** Backend sends an empty `session_objects` list; Agent can still answer definition-only or document-only questions; for hybrid questions the answer may state that no drawing data is available.
+
+---
+
+## 10. Design Decisions & Trade-offs
+
+- **Redis for ephemeral state:** Fast, TTL-based expiry, user-scoped keys (`session:{user_id}:objects`). Fits “latest session per user” without embedding.
+- **Agent is stateless:** Simplifies scaling and security; session is always supplied by the backend so the Agent never stores user data.
+- **Single-step reasoning:** One retrieval + one LLM call per question. Keeps latency and complexity low; sufficient for hybrid RAG with clear prompt design.
+- **Evidence returned:** Enables auditable answers; UI shows which document chunks and which JSON layers were used.
+- **Session summary:** Reduces token usage and noise while preserving layer counts and key flags (e.g. plot boundary, highways present).
+- **Embedding model:** ChromaDB default is used; the pipeline can be swapped to another embedding model by configuring ChromaDB or replacing the vector store implementation.
+
+---
+
+## 11. Optional / Plus Features (Explicitly Called Out)
+
+These go beyond a minimal hybrid RAG implementation:
+
+- **Incremental PDF ingestion with content hashing** — Document registry (SHA256) for NEW/UNCHANGED/UPDATED/DELETED; only changed PDFs are re-ingested.
+- **Streaming answers** — `POST /answer/stream` (NDJSON) and WebSocket `/ws/qa` for token-by-token display.
+- **Geometry guards** — Deterministic answers when spatial questions are asked but required layers lack geometry; avoids LLM hallucination.
+- **Evidence extraction** — Structured evidence (document chunks + session layers/indices) returned with every answer.
+- **Session summaries** — Layer counts and flags computed per request and included in the prompt.
+- **Doc-only routing** — Definition-style questions use a prompt without session JSON to avoid distraction.
+- **Smalltalk handling** — Greetings get a fixed response without retrieval or LLM.
+- **Export** — Q&A dialogue export to Excel and JSON (backend).
+
+---
+
+## 12. Repository Structure
 
 ```
-├── frontend/          # React + Vite app
-│   ├── src/
-│   │   ├── pages/     # LoginPage, Dashboard
-│   │   ├── context/   # AuthContext
-│   │   └── services/  # API client
+├── frontend/          # React + Vite
+│   ├── src/pages/     # LoginPage, Dashboard
+│   ├── src/context/   # AuthContext, ThemeContext
+│   ├── src/services/  # API client
 │   └── Dockerfile
-├── backend/           # FastAPI backend
-│   ├── app/
-│   │   ├── main.py    # Endpoints
-│   │   ├── auth.py    # JWT auth
-│   │   └── session.py # Redis session
+├── backend/           # FastAPI — auth, session, qa, export, ws
+│   ├── app/           # main, auth, session, database, user_service, export_service
 │   └── Dockerfile
-├── agent/             # FastAPI agent
-│   ├── app/
-│   │   ├── main.py    # /answer endpoint
-│   │   ├── ingestion.py
-│   │   ├── vector_store.py
-│   │   ├── prompts.py
-│   │   └── reasoning.py
+├── agent/             # FastAPI — hybrid RAG
+│   ├── app/           # main, ingestion, vector_store, document_registry, sync_service,
+│   │                  # prompts, reasoning, llm_service, retrieval, routing, smalltalk, geometry_guard
 │   └── Dockerfile
 ├── data/
-│   ├── pdfs/          # Place PDF files here
+│   ├── pdfs/          # Place PDFs here
 │   └── sample_objects.json
-├── docs/
-│   └── ARCHITECTURE.md
 ├── docker-compose.yml
 ├── env.example
 └── README.md
 ```
 
-## Troubleshooting
+---
 
-### "Agent service unavailable"
-- Check if agent container is running: `docker-compose ps`
-- Check agent logs: `docker-compose logs agent`
-- Ensure `OPENAI_API_KEY` is set in `.env`
+## 13. License & Notes
 
-### "No relevant excerpts found"
-- Ensure PDF files are in `data/pdfs/`
-- Trigger re-ingestion: `curl -X POST http://localhost:8001/ingest`
-- Check agent logs for ingestion errors
+**License:** MIT
 
-### "Invalid JSON" error
-- Ensure JSON textarea contains valid JSON array
-- Check browser console for parse errors
-- Use the sample JSON as a starting point
-
-### "Incorrect username or password"
-- User credentials are stored in-memory for simplicity (challenge scope). In production, this would be replaced by a persistent database.
-- Register a new user after container restart
-
-### CORS errors
-- Backend has `allow_origins=["*"]` configured
-- If issues persist, check browser network tab for actual error
-
-## Development
-
-### Branch Strategy
-
-- `main` - Stable, production-ready
-- `feat/agent-hybrid-rag` - Agent service
-- `feat/backend-auth-session` - Backend service
-- `feat/frontend-ui` - Frontend
-- `chore/docker-compose` - Docker configuration
-
-### Commit Convention
-
-```
-feat(scope): description
-fix(scope): description
-chore(scope): description
-docs: description
-```
-
-### Running Locally (without Docker)
-
-```bash
-# Terminal 1: Redis
-docker run -p 6379:6379 redis:7-alpine
-
-# Terminal 2: Agent
-cd agent
-pip install -r requirements.txt
-uvicorn app.main:app --port 8001
-
-# Terminal 3: Backend
-cd backend
-pip install -r requirements.txt
-uvicorn app.main:app --port 8000
-
-# Terminal 4: Frontend
-cd frontend
-npm install
-npm run dev
-```
-
-## Demo Script
-
-### Multi-User Isolation Test
-
-1. **User A**: Login → Update JSON (add Highway layer) → Ask "Does this front a highway?" → Answer: Yes
-2. **User B**: Login → Update JSON (remove Highway layer) → Same question → Answer: No
-3. **User A**: Update JSON (remove Highway) → Same question → Answer changes to No
-
-This proves:
-- ✅ Each user has isolated session state
-- ✅ Answers depend on current JSON
-- ✅ Same question + different JSON = different answer
-
-## License
-
-MIT
+**Secrets:** Set `OPENAI_API_KEY` (and optionally `JWT_SECRET_KEY`) in `.env`; do not commit `.env`. User data is stored in SQLite (`data/users.db`); session data in Redis with TTL.
