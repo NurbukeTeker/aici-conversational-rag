@@ -38,6 +38,11 @@ function Dashboard() {
   const [streamingAnswer, setStreamingAnswer] = useState(''); // current streaming text for live update
   const wsRef = useRef(null);
   const [wsReady, setWsReady] = useState(false);
+  const qaMessagesRef = useRef(null);
+  const isNearBottomRef = useRef(true);
+  const lastMessageRef = useRef(null);
+  const prevMessagesLengthRef = useRef(0);
+  const SCROLL_THRESHOLD_PX = 80;
   
   // Export state
   const [exportingExcel, setExportingExcel] = useState(false);
@@ -64,6 +69,30 @@ function Dashboard() {
       setWsReady(false);
     };
   }, []);
+
+  // Auto-scroll to bottom when new content appears, only if user is already near bottom
+  const handleQaMessagesScroll = () => {
+    const el = qaMessagesRef.current;
+    if (!el) return;
+    const { scrollTop, scrollHeight, clientHeight } = el;
+    isNearBottomRef.current = scrollHeight - scrollTop - clientHeight <= SCROLL_THRESHOLD_PX;
+  };
+
+  // When a new question is added, scroll so that question is at top of viewport
+  useEffect(() => {
+    const len = messages.length;
+    if (len > prevMessagesLengthRef.current && len > 0) {
+      lastMessageRef.current?.scrollIntoView({ block: "start" });
+    }
+    prevMessagesLengthRef.current = len;
+  }, [messages.length]);
+
+  // During streaming: scroll to bottom only if user is already near bottom
+  useEffect(() => {
+    if (!qaMessagesRef.current || !isNearBottomRef.current) return;
+    const el = qaMessagesRef.current;
+    el.scrollTop = el.scrollHeight - el.clientHeight;
+  }, [messages, streamingAnswer]);
 
   const loadSessionObjects = async () => {
     try {
@@ -443,7 +472,11 @@ function Dashboard() {
           </div>
           
           <div className="panel-body qa-panel">
-            <div className="qa-messages">
+            <div
+              ref={qaMessagesRef}
+              className="qa-messages"
+              onScroll={handleQaMessagesScroll}
+            >
               {messages.length === 0 ? (
                 <div className="qa-empty">
                   <div className="qa-empty-icon">💬</div>
@@ -453,8 +486,12 @@ function Dashboard() {
                   </p>
                 </div>
               ) : (
-                messages.map((msg) => (
-                  <div key={msg.id} className="qa-message">
+                messages.map((msg, idx) => (
+                  <div
+                    key={msg.id}
+                    ref={idx === messages.length - 1 ? lastMessageRef : undefined}
+                    className="qa-message"
+                  >
                     <div className="qa-question">
                       <div className="qa-question-label">Question</div>
                       <div>{msg.question}</div>
