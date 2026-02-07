@@ -41,36 +41,6 @@ function parseAnswerNarrative(text) {
   return text.trim();
 }
 
-/** Typing effect: reveals text character by character for completed answers. */
-function TypingText({ text, speed = 12, showCursor = true }) {
-  const [displayedLength, setDisplayedLength] = useState(0);
-
-  useEffect(() => {
-    if (!text) {
-      setDisplayedLength(0);
-      return;
-    }
-    setDisplayedLength(0);
-    const len = text.length;
-    let n = 0;
-    const id = setInterval(() => {
-      n += 1;
-      setDisplayedLength(Math.min(n, len));
-      if (n >= len) clearInterval(id);
-    }, speed);
-    return () => clearInterval(id);
-  }, [text, speed]);
-
-  const displayed = (text ?? '').slice(0, displayedLength);
-  const isComplete = displayedLength >= (text?.length ?? 0);
-  return (
-    <>
-      {displayed}
-      {showCursor && !isComplete && <span className="qa-streaming-cursor">▌</span>}
-    </>
-  );
-}
-
 // Sample drawing objects from the specification
 const SAMPLE_OBJECTS = [
   { "layer": "Highway", "type": "line", "properties": { "name": "Main Road", "width": 6 } },
@@ -95,6 +65,10 @@ function Dashboard() {
   const [messages, setMessages] = useState([]);
   const [asking, setAsking] = useState(false);
   const [streamingAnswer, setStreamingAnswer] = useState(''); // current streaming text for live update
+  const [streamingDisplayLength, setStreamingDisplayLength] = useState(0); // human-speed reveal (chars shown so far)
+  const streamingAnswerRef = useRef('');
+  const streamingIntervalRef = useRef(null);
+  const currentStreamingMsgIdRef = useRef(null); // so we can finalize when typing catches up
   const wsRef = useRef(null);
   const [wsReady, setWsReady] = useState(false);
   const qaMessagesRef = useRef(null);
@@ -181,6 +155,45 @@ function Dashboard() {
     el.scrollTop = el.scrollHeight - el.clientHeight;
   }, [messages, streamingAnswer]);
 
+  // Human-speed typing: reveal streaming answer character by character (~35 chars/sec)
+  const STREAMING_CHAR_MS = 28;
+  useEffect(() => {
+    streamingAnswerRef.current = streamingAnswer;
+    if (!streamingAnswer) {
+      setStreamingDisplayLength(0);
+      if (streamingIntervalRef.current) clearInterval(streamingIntervalRef.current);
+      streamingIntervalRef.current = null;
+      return;
+    }
+    streamingIntervalRef.current = setInterval(() => {
+      setStreamingDisplayLength((prev) => {
+        const target = streamingAnswerRef.current.length;
+        if (prev >= target) {
+          if (streamingIntervalRef.current) {
+            clearInterval(streamingIntervalRef.current);
+            streamingIntervalRef.current = null;
+          }
+          // Typing finished — finalize so message shows as complete and evidence can appear (defer to avoid batching issues)
+          const mid = currentStreamingMsgIdRef.current;
+          if (mid != null) {
+            currentStreamingMsgIdRef.current = null;
+            queueMicrotask(() => {
+              setMessages(prevMsgs => prevMsgs.map(m => (m.id === mid ? { ...m, streaming: false } : m)));
+              setStreamingAnswer('');
+              setStreamingDisplayLength(0);
+            });
+          }
+          return prev;
+        }
+        return prev + 1;
+      });
+    }, STREAMING_CHAR_MS);
+    return () => {
+      if (streamingIntervalRef.current) clearInterval(streamingIntervalRef.current);
+      streamingIntervalRef.current = null;
+    };
+  }, [streamingAnswer]);
+
   const loadSessionObjects = async () => {
     try {
       const response = await sessionApi.getObjects();
@@ -243,6 +256,7 @@ function Dashboard() {
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
       // Real-time path: stream via WebSocket
+      currentStreamingMsgIdRef.current = msgId;
       setStreamingAnswer('');
       setMessages(prev => [...prev, {
         id: msgId,
@@ -259,6 +273,7 @@ function Dashboard() {
             setStreamingAnswer(prev => prev + (data.c || ''));
           } else if (data.t === 'done') {
             ws.removeEventListener('message', handler);
+            // Keep streaming: true and keep streamingAnswer — typing continues until animation catches up
             setMessages(prev => prev.map(m =>
               m.id === msgId
                 ? {
@@ -266,11 +281,10 @@ function Dashboard() {
                     answer: data.answer ?? '',
                     evidence: data.evidence ?? null,
                     sessionSummary: data.session_summary ?? null,
-                    streaming: false
+                    streaming: true
                   }
                 : m
             ));
-            setStreamingAnswer('');
             setAsking(false);
           } else if (data.t === 'error') {
             ws.removeEventListener('message', handler);
@@ -279,6 +293,7 @@ function Dashboard() {
               logout();
               return;
             }
+            currentStreamingMsgIdRef.current = null;
             setMessages(prev => prev.map(m =>
               m.id === msgId
                 ? { ...m, answer: `Error: ${data.message || 'Stream failed'}`, evidence: null, streaming: false }
@@ -296,27 +311,42 @@ function Dashboard() {
       return;
     }
 
-    // Fallback: REST
+    // Fallback: REST — add message row first so "Thinking..." appears where the answer will be
+    currentStreamingMsgIdRef.current = msgId;
+    setMessages(prev => [...prev, {
+      id: msgId,
+      question: currentQuestion,
+      answer: '',
+      evidence: null,
+      sessionSummary: null,
+      streaming: true
+    }]);
     try {
       const response = await qaApi.ask(currentQuestion);
-      setMessages(prev => [...prev, {
-        id: msgId,
-        question: currentQuestion,
-        answer: response.answer,
-        evidence: response.evidence,
-        sessionSummary: response.session_summary
-      }]);
+      // Keep streaming: true and feed answer into typing effect so it types out like WebSocket
+      setMessages(prev => prev.map(m =>
+        m.id === msgId
+          ? {
+              ...m,
+              answer: response.answer,
+              evidence: response.evidence,
+              sessionSummary: response.session_summary,
+              streaming: true
+            }
+          : m
+      ));
+      setStreamingAnswer(response.answer || '');
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         logout();
         return;
       }
-      setMessages(prev => [...prev, {
-        id: msgId,
-        question: currentQuestion,
-        answer: `Error: ${err instanceof ApiError ? err.message : 'Failed to get answer'}`,
-        evidence: null
-      }]);
+      currentStreamingMsgIdRef.current = null;
+      setMessages(prev => prev.map(m =>
+        m.id === msgId
+          ? { ...m, answer: `Error: ${err instanceof ApiError ? err.message : 'Failed to get answer'}`, evidence: null, streaming: false }
+          : m
+      ));
     } finally {
       setAsking(false);
     }
@@ -573,14 +603,6 @@ function Dashboard() {
               className="qa-messages"
               onScroll={handleQaMessagesScroll}
             >
-              {asking && !messages.some(m => m.streaming) && (
-                <div className="qa-message">
-                  <div className="qa-answer" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                    <span className="spinner" />
-                    <span>Thinking...</span>
-                  </div>
-                </div>
-              )}
               {messages.length === 0 ? (
                 <div className="qa-empty">
                   <div className="qa-empty-icon">💬</div>
@@ -603,16 +625,23 @@ function Dashboard() {
                     <div className="qa-answer">
                       <div className="qa-answer-text">
                         {msg.streaming ? (
-                          <>
-                            {parseAnswerNarrative(streamingAnswer)}
-                            <span className="qa-streaming-cursor">▌</span>
-                          </>
+                          !streamingAnswer ? (
+                            <span className="qa-thinking" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
+                              <span className="spinner" />
+                              <span>Thinking...</span>
+                            </span>
+                          ) : (
+                            <>
+                              {parseAnswerNarrative(streamingAnswer.slice(0, streamingDisplayLength))}
+                              <span className="qa-streaming-cursor">▌</span>
+                            </>
+                          )
                         ) : (
-                          <TypingText text={parseAnswerNarrative(msg.answer)} />
+                          parseAnswerNarrative(msg.answer)
                         )}
                       </div>
 
-                      {msg.evidence && !msg.streaming && (
+                      {msg.evidence && !msg.streaming && (msg.evidence.document_chunks?.length > 0 || msg.evidence.session_objects) && (
                         <div className="qa-evidence">
                           <div
                             className="qa-evidence-title"
@@ -690,12 +719,12 @@ function Dashboard() {
                 placeholder="Ask about planning regulations..."
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
-                disabled={asking}
+                disabled={asking || messages.some(m => m.streaming)}
               />
               <button
                 type="submit"
                 className="btn-primary qa-submit"
-                disabled={!question.trim() || asking}
+                disabled={!question.trim() || asking || messages.some(m => m.streaming)}
               >
                 Ask
               </button>
