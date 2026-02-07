@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { sessionApi, qaApi, exportApi, ApiError } from '../services/api';
-import SourcesPanel from '../components/SourcesPanel';
 
 // Sample drawing objects from the specification
 const SAMPLE_OBJECTS = [
@@ -381,11 +380,25 @@ function Dashboard() {
                     <div className="qa-answer">
                       <div className="qa-answer-text">{msg.answer}</div>
                       
-                      {/* Collapsible Sources Panel */}
-                      <SourcesPanel 
-                        evidence={msg.evidence} 
-                        sessionSummary={msg.sessionSummary}
-                      />
+                      {msg.evidence && (
+                        <div className="qa-evidence">
+                          <div className="qa-evidence-title">Evidence</div>
+                          {msg.evidence.document_chunks?.length > 0 && (
+                            <div>
+                              {msg.evidence.document_chunks.slice(0, 3).map((chunk, i) => (
+                                <div key={i} className="qa-evidence-item">
+                                  📄 {chunk.source} (p{chunk.page || '?'}) - {chunk.section || 'general'}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {msg.evidence.session_objects && (
+                            <div className="qa-evidence-item">
+                              🏠 Layers: {msg.evidence.session_objects.layers_used.join(', ')}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))
