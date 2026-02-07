@@ -12,6 +12,14 @@ function getWsQaUrl() {
   return `${protocol}//${host}/api/ws/qa?token=${encodeURIComponent(token)}`;
 }
 
+/** Strip the in-text "Evidence:" subsection so only the narrative is shown; evidence lives in the dedicated panel. */
+function stripEvidenceFromAnswer(text) {
+  if (!text || typeof text !== 'string') return text ?? '';
+  const match = text.match(/\n\s*(-\s*)?Evidence\s*:/i);
+  if (!match) return text.trim();
+  return text.slice(0, text.indexOf(match[0])).trim();
+}
+
 // Sample drawing objects from the specification
 const SAMPLE_OBJECTS = [
   { "layer": "Highway", "type": "line", "properties": { "name": "Main Road", "width": 6 } },
@@ -498,13 +506,27 @@ function Dashboard() {
                     </div>
                     <div className="qa-answer">
                       <div className="qa-answer-text">
-                        {msg.streaming ? streamingAnswer : msg.answer}
-                        {msg.streaming && !streamingAnswer && <span className="qa-streaming-cursor">▌</span>}
+                        {(() => {
+                          const narrative = stripEvidenceFromAnswer(msg.streaming ? streamingAnswer : msg.answer);
+                          const showBridging = msg.evidence && !msg.streaming;
+                          return (
+                            <>
+                              {narrative}
+                              {showBridging && (
+                                <>
+                                  {narrative ? '\n\n' : ''}
+                                  Relevant documents and JSON layers used are listed in the Evidence section below.
+                                </>
+                              )}
+                              {msg.streaming && !streamingAnswer && <span className="qa-streaming-cursor">▌</span>}
+                            </>
+                          );
+                        })()}
                       </div>
-                      
+
                       {msg.evidence && !msg.streaming && (
-                        <div className="qa-evidence">
-                          <div className="qa-evidence-title">Evidence</div>
+                        <details className="qa-evidence" open>
+                          <summary className="qa-evidence-title">Evidence</summary>
                           {msg.evidence.document_chunks?.length > 0 && (
                             <div>
                               {msg.evidence.document_chunks.slice(0, 3).map((chunk, i) => (
@@ -519,7 +541,7 @@ function Dashboard() {
                               🏠 Layers: {msg.evidence.session_objects.layers_used.join(', ')}
                             </div>
                           )}
-                        </div>
+                        </details>
                       )}
                     </div>
                   </div>

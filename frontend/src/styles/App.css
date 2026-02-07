@@ -322,7 +322,7 @@
 }
 
 .qa-evidence {
-  margin-top: 1rem;
+  margin-top: 1.25rem;
   padding-top: 1rem;
   border-top: 1px solid var(--color-border);
 }
@@ -334,6 +334,12 @@
   text-transform: uppercase;
   letter-spacing: 0.08em;
   margin-bottom: 0.5rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.qa-evidence-title::-webkit-details-marker {
+  display: none;
 }
 
 .qa-evidence-item {
