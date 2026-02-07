@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from typing import Annotated
 
 import httpx
-from fastapi import FastAPI, HTTPException, Depends, status, Query, Request
+from fastapi import FastAPI, HTTPException, Depends, status, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import JSONResponse, Response
@@ -22,7 +22,7 @@ from .models import (
     ErrorResponse, ExportRequest,
     MAX_PAYLOAD_SIZE_KB, MAX_OBJECTS_COUNT, EXAMPLE_DRAWING_OBJECTS
 )
-from .auth import create_access_token, get_current_user, TokenData
+from .auth import create_access_token, get_current_user, decode_token, TokenData
 from .session import get_session_service, SessionService
 from .database import get_database, get_db_session
 from .user_service import (
@@ -537,6 +537,85 @@ async def ask_question(
         )
 
 
+# ============== WebSocket (Real-time Q&A Streaming) ==============
+
+@app.websocket("/ws/qa")
+async def websocket_qa(websocket: WebSocket):
+    """
+    Real-time Q&A over WebSocket.
+    Authenticate with token in query: /ws/qa?token=<jwt>.
+    Send JSON messages: {"question": "..."}. Receive NDJSON stream: {"t":"chunk","c":"..."} then {"t":"done",...}.
+    """
+    token = websocket.query_params.get("token")
+    if not token:
+        await websocket.close(code=4001)
+        return
+    try:
+        token_data = decode_token(token)
+    except Exception:
+        await websocket.close(code=4001)
+        return
+    if not token_data.user_id:
+        await websocket.close(code=4001)
+        return
+
+    await websocket.accept()
+    session_service = get_session_service()
+    settings = get_settings()
+
+    try:
+        while True:
+            try:
+                raw = await websocket.receive_text()
+                data = json.loads(raw)
+                question = (data.get("question") or "").strip()
+                if not question:
+                    await websocket.send_json({"t": "error", "message": "Missing or empty question"})
+                    continue
+
+                session_objects, _ = session_service.get_objects(token_data.user_id)
+                stream_url = f"{settings.agent_service_url}/answer/stream"
+                async with httpx.AsyncClient(timeout=60.0) as client:
+                    async with client.stream(
+                        "POST",
+                        stream_url,
+                        json={"question": question, "session_objects": session_objects},
+                    ) as response:
+                        if response.status_code != 200:
+                            await websocket.send_json({
+                                "t": "error",
+                                "message": f"Agent error: {response.status_code}"
+                            })
+                            continue
+                        async for line in response.aiter_lines():
+                            if not line:
+                                continue
+                            try:
+                                obj = json.loads(line)
+                                await websocket.send_json(obj)
+                                if obj.get("t") == "done":
+                                    break
+                                if obj.get("t") == "error":
+                                    break
+                            except json.JSONDecodeError:
+                                pass
+            except WebSocketDisconnect:
+                break
+            except Exception as e:
+                logger.exception("WebSocket qa error")
+                try:
+                    await websocket.send_json({"t": "error", "message": str(e)})
+                except Exception:
+                    break
+    except WebSocketDisconnect:
+        pass
+    finally:
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
+
 # ============== Health Endpoint ==============
 
 @app.get("/health", response_model=HealthResponse)
@@ -671,6 +750,7 @@ async def root():
             "/auth/check-password",
             "/session/objects",
             "/qa",
+            "/ws/qa",
             "/export/excel",
             "/export/json",
             "/health"

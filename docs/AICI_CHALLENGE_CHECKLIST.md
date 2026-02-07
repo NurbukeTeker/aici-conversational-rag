@@ -100,9 +100,9 @@ This document maps the **AICI Conversational Q&A System** challenge requirements
 | User authentication (e.g. JWT login/registration) | ✅ | Register, login, JWT, protected routes |
 | Session management for ephemeral object list per user | ✅ | Redis keys per user_id; GET/PUT session objects |
 | Connection to Agent so queries use appropriate session state | ✅ | Backend gets session objects, then POST to Agent with question + session_objects |
-| Real-time communication with Agent | ⚠️ | REST request/response only; no WebSockets or streaming |
+| Real-time communication with Agent | ✅ | WebSocket `/ws/qa` streams answers; Agent `/answer/stream`; REST fallback |
 
-**Notes:** “Real-time” in the spec may mean either (a) “each query uses current session state” (done) or (b) “WebSockets/streaming”. Current design is (a). If evaluators expect (b), consider adding streaming for the Agent response or documenting the choice.
+**Notes:** Real-time is implemented via WebSocket (`/ws/qa`) and Agent streaming (`/answer/stream`). The frontend streams answers token-by-token; REST `POST /qa` remains as fallback.
 
 ### 5.5 Prompt Construction
 
@@ -143,7 +143,7 @@ This document maps the **AICI Conversational Q&A System** challenge requirements
 
 - **Core deliverables:** All main requirements (frontend, backend, agent, containerization, documentation, ephemeral handling, persistent embeddings, hybrid RAG, prompts) are satisfied.
 - **Suggested before submission:**
-  1. **Real-time wording:** If “real-time communication” is interpreted as WebSockets/streaming, add a short note in README or ARCHITECTURE that the design uses REST with “current session state per request” and why (simplicity, challenge scope).
+  1. **Real-time:** Implemented (WebSocket + streaming). See README and ARCHITECTURE.
   2. **Agent framework:** If evaluators expect LangChain/LangGraph, either integrate a minimal LangChain/LangGraph layer or add a sentence in the docs that the agent is a custom pipeline meeting the same functional requirements.
   3. **Frontend:** Either implement a simple Sources Panel (e.g. evidence/sources) or remove the empty `SourcesPanel.jsx` and any references so the repo doesn’t imply unfinished features.
   4. **Docs vs code:** Update README and SYSTEM_OVERVIEW so “user storage” is described as SQLite (persistent), not in-memory, to avoid confusion.

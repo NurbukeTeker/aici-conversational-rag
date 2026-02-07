@@ -105,20 +105,14 @@ User asks question
 - Agent can optimize prompt construction with retrieval results
 - Cleaner separation: Backend handles auth/sessions, Agent handles AI
 
-### 3. Why REST (No WebSockets)
+### 3. Real-time Communication (WebSocket + Streaming)
 
-**Decision:** Simple HTTP REST endpoints, no real-time streaming.
+**Decision:** Support real-time communication as specified: WebSocket for Q&A with streaming answers, plus REST fallback.
 
-**Reasons:**
-- Challenge requirements don't need real-time updates
-- Request/response pattern fits Q&A use case
-- Simpler to implement, test, and debug
-- Lower infrastructure complexity
-
-**When WebSockets would make sense:**
-- Chat with streaming responses
-- Collaborative editing of JSON
-- Live notifications
+**Implementation:**
+- **Frontend ↔ Backend:** WebSocket at `/ws/qa` (JWT in query). Client sends `{"question": "..."}`; backend proxies to the Agent’s streaming endpoint and forwards NDJSON chunks (`{"t":"chunk","c":"..."}` then `{"t":"done",...}`) so the user sees the answer as it is generated.
+- **Backend ↔ Agent:** Backend calls Agent `POST /answer/stream`, which returns a streaming NDJSON response. Each request uses the current session state from Redis.
+- **REST fallback:** `POST /qa` remains; the frontend uses it if the WebSocket is not connected. Each request still uses the latest session state.
 
 ### 4. Why Microservices (3 Services)
 

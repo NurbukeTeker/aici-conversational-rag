@@ -859,10 +859,10 @@ pytest -v
 
 ## Recommended TODOs
 
-1. **Persist users** — Replace `UserStore` with proper database
-2. **Add rate limiting** — Protect `/qa` endpoint (OpenAI costs)
+1. ~~**Persist users**~~ — ✅ Done (SQLite via `UserStore` / `UserService`)
+2. **Add rate limiting** — Protect `/qa` and WebSocket (OpenAI costs)
 3. **Implement refresh tokens** — Better UX for token expiry
-4. **Add streaming** — Stream LLM responses for better UX
+4. ~~**Add streaming**~~ — ✅ Done (WebSocket `/ws/qa` + Agent `/answer/stream`)
 5. **Add document upload** — Admin endpoint to upload PDFs
 6. **Add integration tests** — Test full flows with pytest + docker
 

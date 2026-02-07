@@ -18,6 +18,7 @@ A hybrid Retrieval-Augmented Generation system that combines **persistent knowle
 | Hybrid reasoning | Agent prompt combines retrieved chunks + current JSON |
 | Multi-user sessions | JWT authentication + Redis keys scoped by user_id |
 | Modular system | Frontend + Backend + Agent as separate services |
+| Real-time communication | WebSocket for streaming Q&A; each request uses latest session state |
 
 ## Architecture
 
@@ -120,14 +121,16 @@ streets or private ways.
 | POST | `/auth/login` | Login and get JWT token |
 | PUT | `/session/objects` | Update session JSON objects |
 | GET | `/session/objects` | Get current session objects |
-| POST | `/qa` | Ask a question (hybrid RAG) |
+| POST | `/qa` | Ask a question (hybrid RAG, non-streaming) |
+| WebSocket | `/ws/qa` | Real-time Q&A with streaming answers (token in query) |
 | GET | `/health` | Health check |
 
 ### Agent (Port 8001)
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/answer` | Process question with hybrid RAG |
+| POST | `/answer` | Process question with hybrid RAG (full response) |
+| POST | `/answer/stream` | Same as `/answer` but streams response as NDJSON |
 | POST | `/ingest` | Manually trigger PDF re-ingestion |
 | GET | `/health` | Health check (includes vector store status) |
 
@@ -158,12 +161,12 @@ Vector search happens inside the Agent:
 - Reduces network roundtrips
 - Cleaner separation: Backend = auth/sessions, Agent = AI
 
-### Why REST (No WebSockets)
+### Real-time Communication
 
-Simple HTTP REST, no streaming:
-- Challenge requirements are request/response Q&A
-- Simpler to implement, test, debug
-- Lower infrastructure complexity
+The backend supports **real-time communication** with the AI Agent as required by the challenge:
+- **WebSocket** (`/ws/qa`): The frontend opens a WebSocket (with JWT in query). Questions are sent over the socket; the backend streams the Agent’s answer back token-by-token so the user sees the response as it is generated.
+- **REST** (`POST /qa`): Still available; the frontend falls back to it if the WebSocket is unavailable. Each request uses the latest session state.
+- Communication with the Agent uses the current session state on every request; streaming is implemented via the Agent’s `/answer/stream` endpoint, which the backend proxies to the client.
 
 ### Performance Optimization
 
