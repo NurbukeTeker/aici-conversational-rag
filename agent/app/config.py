@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     
     # Retrieval
     retrieval_top_k: int = 5
+    # Optional: drop chunks with distance > this (Chroma L2; lower = better). None = no filter.
+    retrieval_max_distance: float | None = None
     
     # Chunking
     chunk_size: int = 1000

@@ -1,6 +1,11 @@
 """Tests for prompt formatting."""
 import pytest
-from app.prompts import format_chunk, format_retrieved_chunks, build_user_prompt
+from app.prompts import (
+    format_chunk,
+    format_retrieved_chunks,
+    build_user_prompt,
+    build_user_prompt_doc_only,
+)
 
 
 class TestPromptFormatting:
@@ -86,3 +91,44 @@ class TestPromptFormatting:
         assert "Plot boundary present: False" in prompt
         assert "No plot boundary defined" in prompt
         assert "Rule text" in prompt
+
+
+class TestPromptCompositionDocOnlyVsHybrid:
+    """Doc-only prompt must not contain JSON/session summary; non-doc-only unchanged."""
+
+    def test_doc_only_prompt_no_json_or_session_summary(self):
+        """For doc_only, generated prompt must NOT contain JSON/session summary markers."""
+        prompt = build_user_prompt_doc_only(
+            question="What is a highway?",
+            retrieved_chunks=[
+                {"id": "c1", "source": "doc.pdf", "page": "5", "section": None, "text": "A highway is..."}
+            ],
+        )
+        assert "What is a highway?" in prompt
+        assert "A highway is..." in prompt
+        # Must not contain hybrid-only content
+        assert "Session drawing" not in prompt
+        assert "json_objects" not in prompt
+        assert "layer_counts" not in prompt
+        assert "Layer counts" not in prompt
+        assert "plot_boundary_present" not in prompt
+        assert "highways_present" not in prompt
+
+    def test_non_doc_only_prompt_unchanged(self):
+        """For non-doc_only, existing build_user_prompt remains unchanged (has JSON + summary)."""
+        prompt = build_user_prompt(
+            question="Does this property front a highway?",
+            json_objects=[{"layer": "Highway", "type": "line"}],
+            session_summary={
+                "layer_counts": {"Highway": 1},
+                "plot_boundary_present": True,
+                "highways_present": True,
+                "limitations": [],
+            },
+            retrieved_chunks=[{"id": "c1", "source": "doc.pdf", "page": "1", "section": None, "text": "Highway means..."}],
+        )
+        assert "Does this property front a highway?" in prompt
+        assert "Session drawing objects" in prompt
+        assert "layer_counts" in prompt or "Layer counts" in prompt
+        assert "Highway=1" in prompt
+        assert "Highway means..." in prompt

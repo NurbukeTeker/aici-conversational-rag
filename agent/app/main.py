@@ -20,6 +20,9 @@ from .llm_service import LLMService
 from .document_registry import DocumentRegistry
 from .sync_service import DocumentSyncService
 from . import smalltalk
+from . import routing
+from . import geometry_guard
+from .retrieval import postprocess_retrieved_chunks
 
 # Configure logging
 logging.basicConfig(
@@ -197,41 +200,50 @@ async def answer_question(request: AnswerRequest):
                 session_summary=session_summary
             )
         
+        # Geometry guard: spatial questions with missing geometry → deterministic answer, no retrieval/LLM
+        if geometry_guard.is_spatial_question(request.question):
+            required = geometry_guard.required_layers_for_question(request.question)
+            missing = geometry_guard.missing_geometry_layers(request.session_objects, required)
+            if missing:
+                logger.info("Geometry guard: missing geometry for %s, returning deterministic answer", missing)
+                session_summary = reasoning_service.compute_session_summary(request.session_objects)
+                return AnswerResponse(
+                    answer=(
+                        f"Cannot determine because the current drawing does not provide geometric information "
+                        f"(coordinates/angles/distances) for: {', '.join(sorted(missing))}."
+                    ),
+                    evidence=Evidence(document_chunks=[], session_objects=None),
+                    session_summary=session_summary,
+                )
+        
         # Compute session summary
         session_summary = reasoning_service.compute_session_summary(request.session_objects)
         logger.info(f"Session summary: {session_summary.layer_counts}")
         
-        # Retrieve relevant chunks
+        # Retrieve relevant chunks and postprocess (dedupe by source/page, optional distance threshold)
         settings = get_settings()
-        retrieved_chunks = vector_store.search(
+        raw_chunks = vector_store.search(
             query=request.question,
             top_k=settings.retrieval_top_k
         )
-        logger.info(f"Retrieved {len(retrieved_chunks)} chunks")
+        retrieved_chunks = postprocess_retrieved_chunks(raw_chunks, settings.retrieval_max_distance)
+        logger.info(f"Retrieved {len(raw_chunks)} chunks, {len(retrieved_chunks)} after postprocess")
+        
+        # Definition-only: no session JSON/summary in prompt; evidence.session_objects stays null
+        doc_only = routing.is_definition_only_question(request.question)
+        if doc_only:
+            logger.info("Definition-only question: using doc-only prompt (no session JSON)")
         
         # Generate answer
         answer = llm_service.generate_answer(
             question=request.question,
             session_objects=request.session_objects,
             session_summary=session_summary.model_dump(),
-            retrieved_chunks=retrieved_chunks
+            retrieved_chunks=retrieved_chunks,
+            doc_only=doc_only,
         )
         
-        # Extract layers used for evidence
-        layers_used, indices_used = reasoning_service.extract_layers_used(
-            request.session_objects,
-            request.question
-        )
-        object_labels = []
-        if request.session_objects and indices_used:
-            for i in indices_used:
-                if 0 <= i < len(request.session_objects):
-                    name = (request.session_objects[i].get("properties") or {}).get("name", "")
-                    object_labels.append(str(name) if name else "")
-                else:
-                    object_labels.append("")
-        
-        # Build evidence
+        # Build evidence: doc_only → no session_objects in evidence
         chunk_evidence = [
             ChunkEvidence(
                 chunk_id=chunk["id"],
@@ -242,12 +254,26 @@ async def answer_question(request: AnswerRequest):
             )
             for chunk in retrieved_chunks
         ]
-        
-        object_evidence = ObjectEvidence(
-            layers_used=layers_used,
-            object_indices=indices_used,
-            object_labels=object_labels
-        ) if layers_used else None
+        if doc_only:
+            object_evidence = None
+        else:
+            layers_used, indices_used = reasoning_service.extract_layers_used(
+                request.session_objects,
+                request.question
+            )
+            object_labels = []
+            if request.session_objects and indices_used:
+                for i in indices_used:
+                    if 0 <= i < len(request.session_objects):
+                        name = (request.session_objects[i].get("properties") or {}).get("name", "")
+                        object_labels.append(str(name) if name else "")
+                    else:
+                        object_labels.append("")
+            object_evidence = ObjectEvidence(
+                layers_used=layers_used,
+                object_indices=indices_used,
+                object_labels=object_labels
+            ) if layers_used else None
         
         return AnswerResponse(
             answer=answer,
@@ -287,25 +313,44 @@ async def _stream_answer_ndjson(request: AnswerRequest):
                 "session_summary": session_summary.model_dump(),
             }) + "\n"
             return
+        # Geometry guard: spatial questions with missing geometry → deterministic answer, no retrieval/LLM
+        if geometry_guard.is_spatial_question(request.question):
+            required = geometry_guard.required_layers_for_question(request.question)
+            missing = geometry_guard.missing_geometry_layers(request.session_objects, required)
+            if missing:
+                logger.info("Geometry guard (stream): missing geometry for %s", missing)
+                geom_answer = (
+                    f"Cannot determine because the current drawing does not provide geometric information "
+                    f"(coordinates/angles/distances) for: {', '.join(sorted(missing))}."
+                )
+                yield json.dumps({"t": "chunk", "c": geom_answer}) + "\n"
+                yield json.dumps({
+                    "t": "done",
+                    "answer": geom_answer,
+                    "evidence": {"document_chunks": [], "session_objects": None},
+                    "session_summary": session_summary.model_dump(),
+                }) + "\n"
+                return
         settings = get_settings()
-        retrieved_chunks = vector_store.search(
+        raw_chunks = vector_store.search(
             query=request.question,
             top_k=settings.retrieval_top_k
         )
+        retrieved_chunks = postprocess_retrieved_chunks(raw_chunks, settings.retrieval_max_distance)
+        doc_only = routing.is_definition_only_question(request.question)
+        if doc_only:
+            logger.info("Definition-only question (stream): using doc-only prompt")
         full_answer_chunks = []
         async for chunk in llm_service.generate_answer_stream_async(
             question=request.question,
             session_objects=request.session_objects,
             session_summary=session_summary.model_dump(),
-            retrieved_chunks=retrieved_chunks
+            retrieved_chunks=retrieved_chunks,
+            doc_only=doc_only,
         ):
             full_answer_chunks.append(chunk)
             yield json.dumps({"t": "chunk", "c": chunk}) + "\n"
         full_answer = "".join(full_answer_chunks)
-        layers_used, indices_used = reasoning_service.extract_layers_used(
-            request.session_objects,
-            request.question
-        )
         chunk_evidence = [
             {
                 "chunk_id": c["id"],
@@ -316,18 +361,25 @@ async def _stream_answer_ndjson(request: AnswerRequest):
             }
             for c in retrieved_chunks
         ]
-        object_labels = []
-        if request.session_objects and indices_used:
-            for i in indices_used:
-                if 0 <= i < len(request.session_objects):
-                    name = (request.session_objects[i].get("properties") or {}).get("name", "")
-                    object_labels.append(str(name) if name else "")
-                else:
-                    object_labels.append("")
-        object_evidence = (
-            {"layers_used": layers_used, "object_indices": indices_used, "object_labels": object_labels}
-            if layers_used else None
-        )
+        if doc_only:
+            object_evidence = None
+        else:
+            layers_used, indices_used = reasoning_service.extract_layers_used(
+                request.session_objects,
+                request.question
+            )
+            object_labels = []
+            if request.session_objects and indices_used:
+                for i in indices_used:
+                    if 0 <= i < len(request.session_objects):
+                        name = (request.session_objects[i].get("properties") or {}).get("name", "")
+                        object_labels.append(str(name) if name else "")
+                    else:
+                        object_labels.append("")
+            object_evidence = (
+                {"layers_used": layers_used, "object_indices": indices_used, "object_labels": object_labels}
+                if layers_used else None
+            )
         done_payload = {
             "t": "done",
             "answer": full_answer,

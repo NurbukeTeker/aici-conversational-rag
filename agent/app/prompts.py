@@ -18,7 +18,9 @@ Rules:
 
 6. Return ONLY your direct answer. No "Evidence:" section, no inline document excerpts. End your answer with exactly: "Relevant documents and JSON layers used are listed in the Evidence section below."
 
-7. If the user's JSON is malformed or inconsistent, request a corrected JSON and explain what is wrong."""
+7. If the user's JSON is malformed or inconsistent, request a corrected JSON and explain what is wrong.
+
+8. If required geometric data is missing (geometry is null / no coordinates), you must say it cannot be determined and must not infer spatial relationships."""
 
 
 USER_PROMPT_TEMPLATE = """User question:
@@ -46,6 +48,21 @@ Return ONLY your direct answer:
 - Do NOT include any inline document references (e.g. [DocName_016_0032 | p16]) — the Evidence panel shows them.
 - If uncertain, state uncertainty and what additional data would resolve it.
 - End with exactly: "Relevant documents and JSON layers used are listed in the Evidence section below." """
+
+
+# Doc-only prompt: definition questions — no session JSON or session summary in prompt
+USER_PROMPT_DOC_ONLY_TEMPLATE = """User question:
+{question}
+
+Retrieved regulatory excerpts (persistent knowledge):
+{retrieved_chunks_formatted}
+
+Task:
+Answer the question using ONLY the retrieved excerpts above. Do not refer to any drawing or session state unless the user explicitly asks about it.
+- Quote short phrases from the excerpts where relevant.
+- Do NOT include inline document references (e.g. [DocName_016_0032 | p16]) — the Evidence panel shows them.
+- End with exactly: "Relevant documents and JSON layers used are listed in the Evidence section below."
+Return ONLY your direct answer (no Evidence section, no preamble)."""
 
 
 def format_chunk(chunk_id: str, source: str, page: str | None, section: str | None, text: str) -> str:
@@ -99,5 +116,14 @@ def build_user_prompt(
         plot_boundary_present=session_summary.get("plot_boundary_present", False),
         highways_present=session_summary.get("highways_present", False),
         limitations=limitations_str,
+        retrieved_chunks_formatted=chunks_formatted
+    )
+
+
+def build_user_prompt_doc_only(question: str, retrieved_chunks: list[dict]) -> str:
+    """Build user prompt for definition-only questions: question + retrieved chunks only (no JSON/session summary)."""
+    chunks_formatted = format_retrieved_chunks(retrieved_chunks)
+    return USER_PROMPT_DOC_ONLY_TEMPLATE.format(
+        question=question,
         retrieved_chunks_formatted=chunks_formatted
     )
