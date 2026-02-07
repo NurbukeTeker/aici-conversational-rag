@@ -28,6 +28,22 @@ SMALLTALK_RESPONSE = (
     "What would you like to check?"
 )
 
+# Teşekkür/thanks için uygun cevap
+THANKS_PHRASES = frozenset({
+    "thanks", "thank you", "thx", "thanks!", "thank you!",
+})
+THANKS_RESPONSE = (
+    "You're welcome! Let me know if you need anything else with planning regulations or your drawing."
+)
+
+
+def get_smalltalk_response(message: str) -> str:
+    """Return the appropriate smalltalk response for the message (e.g. thanks vs greeting)."""
+    phrase = _strip_trailing_punctuation(_normalize(message or ""))
+    if phrase in THANKS_PHRASES:
+        return THANKS_RESPONSE
+    return SMALLTALK_RESPONSE
+
 
 def _normalize(message: str) -> str:
     """Normalize for comparison: strip and lowercase."""

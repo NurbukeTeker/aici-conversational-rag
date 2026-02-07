@@ -99,3 +99,21 @@ class TestReasoningService:
         # Should include all layers when no specific keywords
         assert len(layers) == 2
         assert len(indices) == 2
+
+    def test_geometry_null_reports_no_coordinate_limitation(self):
+        """geometry: null -> should report 'No coordinate/geometry data found'."""
+        objects = [
+            {"layer": "Highway", "geometry": None, "type": "line"},
+            {"layer": "Plot Boundary", "geometry": None, "type": "polygon"},
+        ]
+        summary = self.service.compute_session_summary(objects)
+        assert "No coordinate/geometry data found" in summary.limitations
+
+    def test_geometry_with_coordinates_does_not_report_limitation(self):
+        """Objects with valid geometry.coordinates -> should NOT report that limitation."""
+        objects = [
+            {"layer": "Highway", "geometry": {"coordinates": [[0, 0], [1, 0]]}, "type": "line"},
+            {"layer": "Plot Boundary", "geometry": {"coordinates": [[0, 0], [1, 0], [1, 1], [0, 1]]}, "type": "polygon"},
+        ]
+        summary = self.service.compute_session_summary(objects)
+        assert "No coordinate/geometry data found" not in summary.limitations

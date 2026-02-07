@@ -123,7 +123,7 @@ export const healthApi = {
 export const exportApi = {
   /**
    * Download dialogues as Excel file
-   * @param {Array} dialogues - Array of {question, answer, evidence, timestamp}
+   * @param {Array} dialogues - Array of {question, answer, timestamp}
    * @param {Object} sessionSummary - Optional session context
    * @returns {Promise<Blob>} Excel file blob
    */
@@ -155,7 +155,7 @@ export const exportApi = {
   
   /**
    * Download dialogues as JSON file
-   * @param {Array} dialogues - Array of {question, answer, evidence, timestamp}
+   * @param {Array} dialogues - Array of {question, answer, timestamp}
    * @param {Object} sessionSummary - Optional session context
    * @returns {Promise<Blob>} JSON file blob
    */

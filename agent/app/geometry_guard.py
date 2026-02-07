@@ -1,8 +1,43 @@
 """Geometry guard: deterministic guard for spatial questions when geometry is missing.
 Prevents the agent from inventing spatial relationships when session objects have
 geometry: null or no coordinates.
+
+Rule: Trigger geometry guard ONLY when the user is asking about THIS SPECIFIC DRAWING
+(e.g. "does this property...", "in the current drawing..."), NOT when asking about
+general rules (e.g. "what is meant by...", "according to the regulations").
 """
 from __future__ import annotations
+
+# Phrases that indicate a GENERAL RULE / explanatory question → do NOT trigger guard (DOC_ONLY style)
+# Note: "would " removed as too broad; "would this property..." should trigger guard
+_GENERAL_RULE_PHRASES = (
+    "what is meant by",
+    "what is ",
+    "normally be permitted",
+    "does the presence of",
+    "restrict ",
+    "according to the regulations",
+    "according to the regulation",
+    "generally",
+)
+
+# Phrases that indicate the question is about THIS SPECIFIC DRAWING → required to trigger guard
+_THIS_DRAWING_PHRASES = (
+    "does this property",
+    "is this plot",
+    "in the current drawing",
+    "in this drawing",
+    "in this plan",
+    "in this session",
+    "for this property",
+    "for this plot",
+    "current session",
+    "my drawing",
+    "given this drawing",
+    "this drawing",
+    "this property",
+    "this plot",
+)
 
 # Keywords/phrases that indicate a spatial/geometric question (normalized lowercase)
 _SPATIAL_KEYWORDS = frozenset({
@@ -38,6 +73,28 @@ _EXTRA_LAYER_KEYWORDS = {
 
 def _normalize(text: str) -> str:
     return (text or "").strip().lower()
+
+
+def should_trigger_geometry_guard(question: str) -> bool:
+    """
+    One clear rule: trigger geometry guard only when the user is asking about
+    THIS SPECIFIC DRAWING (e.g. "does this property front..."), not about
+    general rules (e.g. "what is meant by fronting?", "according to the regulations").
+    Returns True only if the question is spatial AND about this drawing AND not general.
+    """
+    if not question or not isinstance(question, str):
+        return False
+    normalized = _normalize(question)
+    if not normalized:
+        return False
+    # General rule / explanatory → do not trigger
+    if any(phrase in normalized for phrase in _GENERAL_RULE_PHRASES):
+        return False
+    # Must be about this specific drawing
+    if not any(phrase in normalized for phrase in _THIS_DRAWING_PHRASES):
+        return False
+    # Must be spatial (fronting, distance, etc.)
+    return any(kw in normalized for kw in _SPATIAL_KEYWORDS)
 
 
 def is_spatial_question(question: str) -> bool:

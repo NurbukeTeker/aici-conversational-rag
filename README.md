@@ -97,10 +97,34 @@ This project implements a **hybrid Retrieval-Augmented Generation (RAG)** system
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/answer` | Hybrid RAG (full response) |
+| POST | `/answer` | Hybrid RAG (full response); LangChain + LangGraph |
 | POST | `/answer/stream` | Same, streamed as NDJSON |
 | POST | `/ingest` | Trigger PDF re-ingestion |
 | GET | `/health` | Health and vector store status |
+| GET | `/sync/status` | Document sync status (registry, chunks) |
+
+### 6.1 LangChain + LangGraph-based Agent
+
+The AI Agent service is implemented using LangChain and LangGraph as the primary framework.
+
+- `/answer` and `/answer/stream` are orchestrated via a LangGraph StateGraph.
+- Retrieval is implemented via LangChain's Chroma VectorStore and Retriever abstractions.
+- LLM calls are executed through LangChain LCEL chains (sync and streaming).
+
+There is no separate legacy pipeline; the LangGraph workflow is the single source of truth.
+
+### 6.2 Evidence pipeline (strict correctness)
+
+**When evidence is shown (UI):**
+- **JSON_ONLY:** The Evidence section is **not rendered** at all (answers depend only on session JSON).
+- **DOC_ONLY / HYBRID:** Evidence is shown but **collapsed by default**; the header shows “Sources: N document excerpts · M session objects”. A debug section “Retrieved but not used” appears only in dev mode when `include_debug: true` is set.
+
+**Strict rules:**
+- **DOC_ONLY:** Vector retrieval **must** run. Only chunks that contain the defined term and definition phrasing (e.g. “TERM – is a …”, “means”, “is defined as”) appear in `evidence.document_chunks`. If no chunk matches, the answer states “No explicit definition was found in the retrieved excerpts.” and `document_chunks` is empty (no hallucination).
+- **JSON_ONLY:** Retrieval is **not** called. `evidence.document_chunks` is always empty. Only session layers/indices may appear in evidence; the UI does not show document evidence.
+- **HYBRID:** Retrieval runs; evidence may include 1–3 doc chunks plus session layers. For missing-geometry guard answers, evidence includes the missing layers and optionally one regulatory excerpt.
+
+**Retrieved vs used:** Only **used** chunks (those that pass the definition/relevance filter) appear in `evidence.document_chunks`. Raw similarity results are **retrieved** internally; they appear only in `debug.retrieved_chunks` when `include_debug: true` (or in dev in the UI).
 
 ---
 
@@ -122,6 +146,16 @@ docker compose up --build
 - **Flow:** Register → paste/edit JSON in the editor → **Update Session** → ask questions. Answers and evidence appear in the Q&A panel.
 
 Place PDFs in `data/pdfs/` before or after first run; ingestion runs on agent startup.
+
+**Running tests:**
+
+```bash
+# Agent tests (from repo root)
+cd agent && python -m pytest tests/ -v
+
+# Backend tests
+cd backend && python -m pytest tests/ -v
+```
 
 ---
 
@@ -149,13 +183,15 @@ Evaluators can use these to validate behavior:
 
 ## 10. Design Decisions & Trade-offs
 
+- **Framework:** The agent is implemented natively with LangChain and LangGraph; no procedural legacy pipeline remains in the answer path.
 - **Redis for ephemeral state:** Fast, TTL-based expiry, user-scoped keys (`session:{user_id}:objects`). Fits “latest session per user” without embedding.
 - **Agent is stateless:** Simplifies scaling and security; session is always supplied by the backend so the Agent never stores user data.
 - **Single-step reasoning:** One retrieval + one LLM call per question. Keeps latency and complexity low; sufficient for hybrid RAG with clear prompt design.
 - **Evidence returned:** Enables auditable answers; UI shows which document chunks and which JSON layers were used.
+- **Evidence Policy (explicit):** Evidence is shown only when it directly supports the answer. Document excerpts appear only when the answer is grounded in PDF content (source, page, snippet). Session (JSON) evidence appears only when the answer relies on drawing data (layers and object indices). For answers that do not use documents or session (e.g. smalltalk, geometry-missing guards, follow-up prompts), the UI shows an explicit message that the answer is from system-level validation or missing input, not retrieved knowledge—no fabricated or decorative evidence.
 - **Session summary:** Reduces token usage and noise while preserving layer counts and key flags (e.g. plot boundary, highways present).
 - **Embedding model:** ChromaDB default is used; the pipeline can be swapped to another embedding model by configuring ChromaDB or replacing the vector store implementation.
-- **LangChain usage:** Limited to `ChatOpenAI` (LLM calls) and `RecursiveCharacterTextSplitter` (PDF chunking). No LangGraph, chains, or agents.
+- **LangChain + LangGraph:** Retrieval (LangChain Chroma), prompts/chains (LCEL), and orchestration (StateGraph) are the single implementation for `/answer` and `/answer/stream`.
 
 ---
 
@@ -171,6 +207,7 @@ These go beyond a minimal hybrid RAG implementation:
 - **Doc-only routing** — Definition-style questions use a prompt without session JSON to avoid distraction.
 - **Smalltalk handling** — Greetings get a fixed response without retrieval or LLM.
 - **Export** — Q&A dialogue export to Excel and JSON (backend).
+- **LangGraph-based agent** — `/answer` and `/answer/stream` are implemented with LangChain + LangGraph (StateGraph, LCEL chains, LangChain Chroma).
 
 ---
 
@@ -187,7 +224,8 @@ These go beyond a minimal hybrid RAG implementation:
 │   └── Dockerfile
 ├── agent/             # FastAPI — hybrid RAG
 │   ├── app/           # main, ingestion, vector_store, document_registry, sync_service,
-│   │                  # prompts, reasoning, llm_service, retrieval, routing, smalltalk, geometry_guard
+│   │                  # lc/ (prompts, chains), retrieval_lc, graph_lc/ (state, nodes, graph_builder),
+│   │                  # reasoning, routing, smalltalk, geometry_guard, doc_only_guard, followups
 │   └── Dockerfile
 ├── data/
 │   ├── pdfs/          # Place PDFs here

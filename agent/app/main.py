@@ -1,4 +1,4 @@
-"""Agent service - FastAPI application."""
+"""Agent service - FastAPI application. LangChain + LangGraph primary framework."""
 import json
 import logging
 from pathlib import Path
@@ -10,20 +10,18 @@ from fastapi.responses import StreamingResponse
 
 from .config import get_settings
 from .models import (
-    AnswerRequest, AnswerResponse, Evidence, ChunkEvidence, ObjectEvidence,
+    AnswerRequest, AnswerResponse,
     IngestRequest, IngestResponse, HealthResponse, SyncStatusResponse, DocumentInfo
 )
 from .ingestion import PDFIngestionService
 from .vector_store import VectorStoreService
 from .reasoning import ReasoningService
-from .llm_service import LLMService
 from .document_registry import DocumentRegistry
 from .sync_service import DocumentSyncService
-from . import smalltalk
-from . import routing
-from . import geometry_guard
-from . import followups
-from .retrieval import postprocess_retrieved_chunks
+from .graph_lc import build_answer_graph, run_graph_until_route
+from .graph_lc import nodes as graph_nodes
+from .doc_only_guard import should_use_retrieved_for_doc_only
+from .lc.chains import DOC_ONLY_EMPTY_MESSAGE, build_chains, astream_doc_only, astream_hybrid
 
 # Configure logging
 logging.basicConfig(
@@ -36,26 +34,25 @@ logger = logging.getLogger(__name__)
 vector_store: VectorStoreService | None = None
 ingestion_service: PDFIngestionService | None = None
 reasoning_service: ReasoningService | None = None
-llm_service: LLMService | None = None
 document_registry: DocumentRegistry | None = None
 sync_service: DocumentSyncService | None = None
+answer_graph = None  # LangGraph compiled graph (built at startup)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan handler."""
-    global vector_store, ingestion_service, reasoning_service, llm_service
-    global document_registry, sync_service
-    
+    global vector_store, ingestion_service, reasoning_service
+    global document_registry, sync_service, answer_graph
+
     logger.info("Starting Agent service...")
     settings = get_settings()
-    
+
     # Initialize services
     vector_store = VectorStoreService()
     ingestion_service = PDFIngestionService()
     reasoning_service = ReasoningService()
-    llm_service = LLMService()
-    
+
     # Initialize document registry and sync service
     registry_path = Path(settings.chroma_persist_directory) / "document_registry.json"
     document_registry = DocumentRegistry(registry_path)
@@ -64,11 +61,24 @@ async def lifespan(app: FastAPI):
         ingestion_service=ingestion_service,
         vector_store=vector_store
     )
-    
+
+    # Build LCEL chains and LangGraph workflow
+    build_chains(
+        model=settings.openai_model,
+        api_key=settings.openai_api_key,
+        temperature=0.1,
+        max_tokens=2000,
+    )
+    answer_graph = build_answer_graph(
+        reasoning_service=reasoning_service,
+        settings=settings,
+    )
+    logger.info("LangChain LCEL chains and LangGraph workflow initialized")
+
     # Incremental sync on startup (idempotent)
     logger.info("Running incremental document sync...")
     result = sync_service.sync(delete_missing=False)
-    
+
     if result.has_changes:
         logger.info(
             f"Sync result: {result.new_documents} new, "
@@ -77,15 +87,15 @@ async def lifespan(app: FastAPI):
         )
     else:
         logger.info(f"No changes detected, {result.unchanged_documents} documents unchanged")
-    
+
     if result.errors:
         for error in result.errors:
             logger.error(f"Sync error: {error}")
-    
+
     logger.info("Agent service started successfully")
-    
+
     yield
-    
+
     logger.info("Shutting down Agent service...")
 
 
@@ -107,6 +117,11 @@ app.add_middleware(
 )
 
 
+def _llm_available() -> bool:
+    """Check if LLM is configured."""
+    return bool(get_settings().openai_api_key)
+
+
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     """Health check endpoint."""
@@ -123,7 +138,7 @@ async def get_sync_status():
     """Get current document sync status."""
     if not sync_service:
         raise HTTPException(status_code=503, detail="Services not initialized")
-    
+
     status = sync_service.get_status()
     return SyncStatusResponse(
         registered_documents=status["registered_documents"],
@@ -148,7 +163,7 @@ async def ingest_documents(request: IngestRequest):
     """Ingest PDF documents into the vector store (incremental sync)."""
     if not sync_service:
         raise HTTPException(status_code=503, detail="Services not initialized")
-    
+
     try:
         if request.force_reingest:
             logger.info("Force reingest requested...")
@@ -156,9 +171,9 @@ async def ingest_documents(request: IngestRequest):
         else:
             logger.info("Running incremental sync...")
             result = sync_service.sync(delete_missing=request.delete_missing)
-        
+
         total_docs = result.new_documents + result.updated_documents
-        
+
         return IngestResponse(
             success=True,
             documents_processed=total_docs,
@@ -170,253 +185,108 @@ async def ingest_documents(request: IngestRequest):
                 f"{result.deleted_documents} deleted"
             )
         )
-        
+
     except Exception as e:
         logger.error(f"Ingestion error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _run_answer_graph(request: AnswerRequest) -> AnswerResponse:
+    """Run LangGraph workflow and return AnswerResponse."""
+    if not answer_graph:
+        raise HTTPException(status_code=503, detail="Answer workflow not initialized")
+    initial_state = {
+        "question": request.question,
+        "session_objects": request.session_objects,
+    }
+    final_state = answer_graph.invoke(initial_state)
+    return AnswerResponse(
+        answer=final_state.get("answer_text", ""),
+        query_mode=final_state.get("query_mode"),
+        session_summary=final_state.get("session_summary"),
+    )
+
+
 @app.post("/answer", response_model=AnswerResponse)
 async def answer_question(request: AnswerRequest):
-    """Answer a question using hybrid RAG."""
-    if not vector_store or not reasoning_service or not llm_service:
+    """Answer a question using LangChain + LangGraph hybrid RAG."""
+    if not vector_store or not reasoning_service:
         raise HTTPException(status_code=503, detail="Services not initialized")
-    
-    if not llm_service.is_available():
+    if not _llm_available():
         raise HTTPException(status_code=503, detail="LLM service not configured (missing API key)")
-    
     try:
-        # Validate session JSON
-        warnings = reasoning_service.validate_json_schema(request.session_objects)
-        if warnings:
-            logger.warning(f"JSON validation warnings: {warnings}")
-        
-        # Small-talk: return short friendly response without RAG or evidence
-        if smalltalk.is_smalltalk(request.question):
-            logger.info("Small-talk detected, skipping RAG")
-            session_summary = reasoning_service.compute_session_summary(request.session_objects)
-            return AnswerResponse(
-                answer=smalltalk.SMALLTALK_RESPONSE,
-                evidence=Evidence(document_chunks=[], session_objects=None),
-                session_summary=session_summary
-            )
-        
-        # Geometry guard: spatial questions with missing geometry → deterministic answer, no retrieval/LLM
-        if geometry_guard.is_spatial_question(request.question):
-            required = geometry_guard.required_layers_for_question(request.question)
-            missing = geometry_guard.missing_geometry_layers(request.session_objects, required)
-            if missing:
-                logger.info("Geometry guard: missing geometry for %s, returning deterministic answer", missing)
-                session_summary = reasoning_service.compute_session_summary(request.session_objects)
-                return AnswerResponse(
-                    answer=(
-                        f"Cannot determine because the current drawing does not provide geometric information "
-                        f"(coordinates/angles/distances) for: {', '.join(sorted(missing))}."
-                    ),
-                    evidence=Evidence(document_chunks=[], session_objects=None),
-                    session_summary=session_summary,
-                )
-        
-        # Needs-input follow-up: "what it needs?" etc. after geometry refusal → deterministic checklist, no retrieval/LLM
-        if followups.is_needs_input_followup(request.question):
-            missing_layers = followups.get_missing_geometry_layers(request.session_objects)
-            if missing_layers:
-                logger.info("Needs-input follow-up: returning checklist for %s", missing_layers)
-                session_summary = reasoning_service.compute_session_summary(request.session_objects)
-                return AnswerResponse(
-                    answer=followups.build_needs_input_message(missing_layers),
-                    evidence=Evidence(document_chunks=[], session_objects=None),
-                    session_summary=session_summary,
-                )
-        
-        # Compute session summary
-        session_summary = reasoning_service.compute_session_summary(request.session_objects)
-        logger.info(f"Session summary: {session_summary.layer_counts}")
-        
-        # Retrieve relevant chunks and postprocess (dedupe by source/page, optional distance threshold)
-        settings = get_settings()
-        raw_chunks = vector_store.search(
-            query=request.question,
-            top_k=settings.retrieval_top_k
-        )
-        retrieved_chunks = postprocess_retrieved_chunks(raw_chunks, settings.retrieval_max_distance)
-        logger.info(f"Retrieved {len(raw_chunks)} chunks, {len(retrieved_chunks)} after postprocess")
-        
-        # Definition-only: no session JSON/summary in prompt; evidence.session_objects stays null
-        doc_only = routing.is_definition_only_question(request.question)
-        if doc_only:
-            logger.info("Definition-only question: using doc-only prompt (no session JSON)")
-        
-        # Generate answer
-        answer = llm_service.generate_answer(
-            question=request.question,
-            session_objects=request.session_objects,
-            session_summary=session_summary.model_dump(),
-            retrieved_chunks=retrieved_chunks,
-            doc_only=doc_only,
-        )
-        
-        # Build evidence: doc_only → no session_objects in evidence
-        chunk_evidence = [
-            ChunkEvidence(
-                chunk_id=chunk["id"],
-                source=chunk["source"],
-                page=chunk.get("page"),
-                section=chunk.get("section"),
-                text_snippet=chunk["text"][:200] + "..." if len(chunk["text"]) > 200 else chunk["text"]
-            )
-            for chunk in retrieved_chunks
-        ]
-        if doc_only:
-            object_evidence = None
-        else:
-            layers_used, indices_used = reasoning_service.extract_layers_used(
-                request.session_objects,
-                request.question
-            )
-            object_labels = []
-            if request.session_objects and indices_used:
-                for i in indices_used:
-                    if 0 <= i < len(request.session_objects):
-                        name = (request.session_objects[i].get("properties") or {}).get("name", "")
-                        object_labels.append(str(name) if name else "")
-                    else:
-                        object_labels.append("")
-            object_evidence = ObjectEvidence(
-                layers_used=layers_used,
-                object_indices=indices_used,
-                object_labels=object_labels
-            ) if layers_used else None
-        
-        return AnswerResponse(
-            answer=answer,
-            evidence=Evidence(
-                document_chunks=chunk_evidence,
-                session_objects=object_evidence
-            ),
-            session_summary=session_summary
-        )
-        
+        return _run_answer_graph(request)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error answering question: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _state_to_done_payload(state: dict) -> dict:
+    """Build NDJSON done payload from graph state."""
+    session_summary = state.get("session_summary")
+    if session_summary is not None and hasattr(session_summary, "model_dump"):
+        session_summary = session_summary.model_dump()
+    return {
+        "t": "done",
+        "answer": state.get("answer_text", ""),
+        "query_mode": state.get("query_mode"),
+        "session_summary": session_summary,
+    }
+
+
 async def _stream_answer_ndjson(request: AnswerRequest):
-    """Async generator yielding NDJSON lines for streaming response."""
-    if not vector_store or not reasoning_service or not llm_service:
+    """Async generator: run graph nodes until route, stream LLM via LCEL astream, then finalize. Single source of truth: graph_lc nodes."""
+    if not vector_store or not reasoning_service:
         yield json.dumps({"t": "error", "message": "Services not initialized"}) + "\n"
         return
-    if not llm_service.is_available():
+    if not _llm_available():
         yield json.dumps({"t": "error", "message": "LLM not configured"}) + "\n"
         return
     try:
-        warnings = reasoning_service.validate_json_schema(request.session_objects)
-        if warnings:
-            logger.warning(f"JSON validation warnings: {warnings}")
-        session_summary = reasoning_service.compute_session_summary(request.session_objects)
-        # Small-talk: return fixed response without RAG or evidence
-        if smalltalk.is_smalltalk(request.question):
-            logger.info("Small-talk detected (stream), skipping RAG")
-            yield json.dumps({"t": "chunk", "c": smalltalk.SMALLTALK_RESPONSE}) + "\n"
-            yield json.dumps({
-                "t": "done",
-                "answer": smalltalk.SMALLTALK_RESPONSE,
-                "evidence": {"document_chunks": [], "session_objects": None},
-                "session_summary": session_summary.model_dump(),
-            }) + "\n"
-            return
-        # Geometry guard: spatial questions with missing geometry → deterministic answer, no retrieval/LLM
-        if geometry_guard.is_spatial_question(request.question):
-            required = geometry_guard.required_layers_for_question(request.question)
-            missing = geometry_guard.missing_geometry_layers(request.session_objects, required)
-            if missing:
-                logger.info("Geometry guard (stream): missing geometry for %s", missing)
-                geom_answer = (
-                    f"Cannot determine because the current drawing does not provide geometric information "
-                    f"(coordinates/angles/distances) for: {', '.join(sorted(missing))}."
-                )
-                yield json.dumps({"t": "chunk", "c": geom_answer}) + "\n"
-                yield json.dumps({
-                    "t": "done",
-                    "answer": geom_answer,
-                    "evidence": {"document_chunks": [], "session_objects": None},
-                    "session_summary": session_summary.model_dump(),
-                }) + "\n"
-                return
-        # Needs-input follow-up: "what it needs?" etc. → deterministic checklist, no retrieval/LLM
-        if followups.is_needs_input_followup(request.question):
-            missing_layers = followups.get_missing_geometry_layers(request.session_objects)
-            if missing_layers:
-                logger.info("Needs-input follow-up (stream): returning checklist for %s", missing_layers)
-                followup_answer = followups.build_needs_input_message(missing_layers)
-                yield json.dumps({"t": "chunk", "c": followup_answer}) + "\n"
-                yield json.dumps({
-                    "t": "done",
-                    "answer": followup_answer,
-                    "evidence": {"document_chunks": [], "session_objects": None},
-                    "session_summary": session_summary.model_dump(),
-                }) + "\n"
-                return
         settings = get_settings()
-        raw_chunks = vector_store.search(
-            query=request.question,
-            top_k=settings.retrieval_top_k
-        )
-        retrieved_chunks = postprocess_retrieved_chunks(raw_chunks, settings.retrieval_max_distance)
-        doc_only = routing.is_definition_only_question(request.question)
-        if doc_only:
-            logger.info("Definition-only question (stream): using doc-only prompt")
+        state = run_graph_until_route(request, reasoning_service, settings)
+
+        # Guard path: finalize and emit chunk + done
+        if state.get("guard_result"):
+            state.update(graph_nodes.finalize_node(state))
+            answer_text = state.get("answer_text", "")
+            yield json.dumps({"t": "chunk", "c": answer_text}) + "\n"
+            yield json.dumps(_state_to_done_payload(state)) + "\n"
+            return
+
+        # Main path: stream LLM, then finalize
+        retrieved_docs = state.get("retrieved_docs", [])
+        doc_only = state.get("doc_only", False)
+        session_summary = state.get("session_summary")
+        session_summary_dict = session_summary.model_dump() if session_summary else {}
+
         full_answer_chunks = []
-        async for chunk in llm_service.generate_answer_stream_async(
-            question=request.question,
-            session_objects=request.session_objects,
-            session_summary=session_summary.model_dump(),
-            retrieved_chunks=retrieved_chunks,
-            doc_only=doc_only,
-        ):
-            full_answer_chunks.append(chunk)
-            yield json.dumps({"t": "chunk", "c": chunk}) + "\n"
-        full_answer = "".join(full_answer_chunks)
-        chunk_evidence = [
-            {
-                "chunk_id": c["id"],
-                "source": c["source"],
-                "page": c.get("page"),
-                "section": c.get("section"),
-                "text_snippet": (c["text"][:200] + "..." if len(c["text"]) > 200 else c["text"]),
-            }
-            for c in retrieved_chunks
-        ]
         if doc_only:
-            object_evidence = None
+            if not retrieved_docs or not should_use_retrieved_for_doc_only(request.question, retrieved_docs):
+                override_msg = DOC_ONLY_EMPTY_MESSAGE
+                state["answer_text"] = override_msg
+                yield json.dumps({"t": "chunk", "c": override_msg}) + "\n"
+            else:
+                async for chunk in astream_doc_only(request.question, retrieved_docs):
+                    full_answer_chunks.append(chunk)
+                    yield json.dumps({"t": "chunk", "c": chunk}) + "\n"
+                state["answer_text"] = "".join(full_answer_chunks)
         else:
-            layers_used, indices_used = reasoning_service.extract_layers_used(
+            async for chunk in astream_hybrid(
+                request.question,
                 request.session_objects,
-                request.question
-            )
-            object_labels = []
-            if request.session_objects and indices_used:
-                for i in indices_used:
-                    if 0 <= i < len(request.session_objects):
-                        name = (request.session_objects[i].get("properties") or {}).get("name", "")
-                        object_labels.append(str(name) if name else "")
-                    else:
-                        object_labels.append("")
-            object_evidence = (
-                {"layers_used": layers_used, "object_indices": indices_used, "object_labels": object_labels}
-                if layers_used else None
-            )
-        done_payload = {
-            "t": "done",
-            "answer": full_answer,
-            "evidence": {
-                "document_chunks": chunk_evidence,
-                "session_objects": object_evidence,
-            },
-            "session_summary": session_summary.model_dump(),
-        }
-        yield json.dumps(done_payload) + "\n"
+                session_summary_dict,
+                retrieved_docs,
+            ):
+                full_answer_chunks.append(chunk)
+                yield json.dumps({"t": "chunk", "c": chunk}) + "\n"
+            state["answer_text"] = "".join(full_answer_chunks)
+
+        state.update(graph_nodes.finalize_node(state))
+        yield json.dumps(_state_to_done_payload(state)) + "\n"
+
     except Exception as e:
         logger.error(f"Error streaming answer: {e}")
         yield json.dumps({"t": "error", "message": str(e)}) + "\n"
@@ -425,12 +295,12 @@ async def _stream_answer_ndjson(request: AnswerRequest):
 @app.post("/answer/stream")
 async def answer_question_stream(request: AnswerRequest):
     """
-    Answer a question using hybrid RAG with streaming response.
-    Returns NDJSON stream: lines of {"t":"chunk","c":"..."} then {"t":"done", ...}.
+    Answer a question with streaming response.
+    Returns NDJSON: {"t":"chunk","c":"..."} then {"t":"done", ...}.
     """
-    if not vector_store or not reasoning_service or not llm_service:
+    if not vector_store or not reasoning_service:
         raise HTTPException(status_code=503, detail="Services not initialized")
-    if not llm_service.is_available():
+    if not _llm_available():
         raise HTTPException(status_code=503, detail="LLM service not configured (missing API key)")
     return StreamingResponse(
         _stream_answer_ndjson(request),
@@ -450,6 +320,6 @@ async def root():
         "features": [
             "Idempotent document ingestion with content hashing",
             "Incremental sync (NEW, UNCHANGED, UPDATED, DELETED)",
-            "Hybrid RAG with persistent knowledge + ephemeral session"
+            "Hybrid RAG with LangChain + LangGraph (retrieval, LCEL chains, StateGraph)"
         ]
     }

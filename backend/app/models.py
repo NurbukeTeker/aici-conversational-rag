@@ -1,6 +1,6 @@
 """Pydantic models for Backend service."""
 from pydantic import BaseModel, Field, EmailStr, field_validator, ConfigDict
-from typing import Any
+from typing import Any, Literal
 import re
 
 
@@ -310,9 +310,10 @@ class ObjectEvidence(BaseModel):
 
 
 class Evidence(BaseModel):
-    """Combined evidence."""
+    """Combined evidence. query_mode: UI hides Evidence for json_only; collapse by default for doc_only/hybrid."""
     document_chunks: list[ChunkEvidence] = Field(default_factory=list)
     session_objects: ObjectEvidence | None = None
+    query_mode: Literal["doc_only", "json_only", "hybrid"] | None = Field(default=None)
 
 
 class SessionSummary(BaseModel):

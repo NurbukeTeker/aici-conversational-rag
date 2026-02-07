@@ -36,9 +36,11 @@ aici-conversational-rag/
 │   ├── app/
 │   │   ├── main.py           # FastAPI entry point
 │   │   ├── config.py         # Settings (OpenAI key, ChromaDB path)
-│   │   ├── llm_service.py    # OpenAI API integration
-│   │   ├── prompts.py        # System/user prompt templates
-│   │   ├── vector_store.py   # ChromaDB operations
+│   │   ├── lc/               # LangChain prompts + LCEL chains (doc_only, hybrid)
+│   │   ├── retrieval_lc.py   # LangChain Chroma retriever
+│   │   ├── graph_lc/         # LangGraph StateGraph (nodes, state, graph_builder)
+│   │   ├── prompts.py        # Legacy prompt helpers (used by tests)
+│   │   ├── vector_store.py   # ChromaDB (sync/ingestion only)
 │   │   ├── ingestion.py      # PDF text extraction + chunking
 │   │   ├── document_registry.py  # Content hashing for idempotent sync
 │   │   ├── sync_service.py   # Incremental document sync logic
@@ -151,10 +153,11 @@ aici-conversational-rag/
 │  TTL: 3600s (1 hour)          │    │    POST /answer         → Hybrid RAG  │
 └───────────────────────────────┘    ├───────────────────────────────────────┤
                                      │  Internal Components:                 │
-                                     │    • VectorStoreService (ChromaDB)    │
+                                     │    • LangGraph StateGraph (orchestration) │
+                                     │    • retrieval_lc (LangChain Chroma)  │
+                                     │    • LCEL chains (doc_only, hybrid)   │
                                      │    • PDFIngestionService (pypdf)      │
                                      │    • DocumentRegistry (SHA256 hash)   │
-                                     │    • LLMService (OpenAI API)          │
                                      │    • ReasoningService (JSON summary)  │
                                      └─────────────────┬─────────────────────┘
                                                        │
@@ -197,15 +200,15 @@ User Question + Session JSON
                                                │
                                                ▼
                                     ┌─────────────────────┐
-                                    │     LLMService      │
-                                    │  .generate_answer() │
-                                    │                     │
-                                    │  Prompt:            │
-                                    │   • System prompt   │
-                                    │   • Question        │
-                                    │   • JSON objects    │
-                                    │   • Session summary │
-                                    │   • Retrieved chunks│
+                                    │  LangGraph + LCEL   │
+                                    │  StateGraph invoke  │
+                                    │  (nodes: validate,  │
+                                    │   smalltalk, guard, │
+                                    │   retrieve, route,  │
+                                    │   llm, evidence)    │
+                                    │  Prompt: question + │
+                                    │   JSON + summary +  │
+                                    │   retrieved chunks  │
                                     └──────────┬──────────┘
                                                │
                                                ▼
@@ -277,13 +280,11 @@ User Question + Session JSON
    - Validates JWT token
    - Retrieves session objects from Redis: `session_service.get_objects(user_id)`
    - Calls agent: `httpx.post("http://agent:8001/answer", json={question, session_objects})`
-4. **Agent** `main.py:answer_question()`:
-   - **Validate JSON**: `reasoning_service.validate_json_schema(session_objects)`
-   - **Compute Summary**: `reasoning_service.compute_session_summary()` → layer counts, flags
-   - **Retrieve Chunks**: `vector_store.search(query, top_k=5)`
-   - **Build Prompt**: `prompts.py:build_user_prompt()` → combines question + JSON + summary + chunks
-   - **Call LLM**: `llm_service.generate_answer()` → OpenAI API
-   - **Extract Evidence**: `reasoning_service.extract_layers_used()`
+4. **Agent** `main.py:answer_question()` → `answer_graph.invoke(initial_state)`:
+   - **LangGraph** runs: validate → smalltalk → geometry_guard → followup → summarize → retrieve → route → llm → evidence → finalize.
+   - **Retrieve**: `retrieval_lc.retrieve()` (LangChain Chroma).
+   - **LLM**: LCEL chains (`lc.chains`: doc_only_chain or hybrid_chain).
+   - **Evidence**: built in evidence_node from retrieved_docs + `reasoning_service.extract_layers_used()`.
 5. **Response Path** → `AnswerResponse` → Backend → Frontend
 6. **Frontend** → Adds message to `messages` state array, displays in chat
 
@@ -494,19 +495,7 @@ Task: ...
 
 ### LLM Call
 
-**Location:** `agent/app/llm_service.py:LLMService`
-
-```python
-response = self.client.chat.completions.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": user_prompt}
-    ],
-    temperature=0.1,
-    max_tokens=2000
-)
-```
+**Location:** `agent/app/lc/chains.py` (LCEL: `DOC_ONLY_PROMPT | llm | StrOutputParser()` and `HYBRID_PROMPT | llm | StrOutputParser()`). Orchestrated by LangGraph `llm_node`; no separate LLM service. Prompts in `agent/app/lc/prompts.py` (ChatPromptTemplate).
 
 ## Memory / History Handling
 

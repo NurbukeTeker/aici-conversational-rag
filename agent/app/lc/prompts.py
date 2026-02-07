@@ -1,4 +1,7 @@
-"""Prompt templates for hybrid RAG."""
+"""LangChain ChatPromptTemplate equivalents for hybrid RAG (content same as existing prompts)."""
+from __future__ import annotations
+
+from langchain_core.prompts import ChatPromptTemplate
 
 SYSTEM_PROMPT = """You are a careful assistant that answers user questions by combining:
 (1) retrieved excerpts from planning/regulatory documents (persistent knowledge) and
@@ -23,7 +26,10 @@ Rules:
 8. If required geometric data is missing (geometry is null / no coordinates), you must say it cannot be determined and must not infer spatial relationships."""
 
 
-USER_PROMPT_TEMPLATE = """User question:
+# Hybrid: question + session JSON + session summary + retrieved chunks
+HYBRID_PROMPT = ChatPromptTemplate.from_messages([
+    ("system", SYSTEM_PROMPT),
+    ("human", """User question:
 {question}
 
 Session drawing objects (current JSON):
@@ -46,11 +52,13 @@ Task:
 Return ONLY your direct answer:
 - One or two paragraphs: your direct answer (short, direct).
 - Do NOT include any inline document references (e.g. [DocName_016_0032 | p16]).
-- If uncertain, state uncertainty and what additional data would resolve it."""
+- If uncertain, state uncertainty and what additional data would resolve it.""")
+])
 
-
-# Doc-only prompt: definition questions — no session JSON or session summary in prompt
-USER_PROMPT_DOC_ONLY_TEMPLATE = """User question:
+# Doc-only: question + retrieved chunks only (no session JSON/summary)
+DOC_ONLY_PROMPT = ChatPromptTemplate.from_messages([
+    ("system", SYSTEM_PROMPT),
+    ("human", """User question:
 {question}
 
 Retrieved regulatory excerpts (persistent knowledge):
@@ -60,68 +68,12 @@ Task:
 Answer the question using ONLY the retrieved excerpts above. Do not refer to any drawing or session state unless the user explicitly asks about it.
 - Quote short phrases from the excerpts where relevant.
 - Do NOT include inline document references (e.g. [DocName_016_0032 | p16]).
-Return ONLY your direct answer (no Evidence section, no preamble)."""
+Return ONLY your direct answer (no Evidence section, no preamble).""")
+])
 
 
-def format_chunk(chunk_id: str, source: str, page: str | None, section: str | None, text: str) -> str:
-    """Format a retrieved chunk for the prompt."""
+def format_chunk_for_prompt(chunk_id: str, source: str, page: str | None, section: str | None, text: str) -> str:
+    """Format a retrieved chunk for the prompt (same as prompts.format_chunk)."""
     page_str = f"p{page}" if page else "p?"
     section_str = f" | {section}" if section else ""
     return f"[DOC: {source} | {page_str} | chunk: {chunk_id}{section_str}]\n{text}"
-
-
-def format_retrieved_chunks(chunks: list[dict]) -> str:
-    """Format all retrieved chunks for the prompt."""
-    if not chunks:
-        return "No relevant excerpts found."
-    
-    formatted = []
-    for chunk in chunks:
-        formatted.append(format_chunk(
-            chunk_id=chunk.get("id", "unknown"),
-            source=chunk.get("source", "unknown"),
-            page=chunk.get("page"),
-            section=chunk.get("section"),
-            text=chunk.get("text", "")
-        ))
-    
-    return "\n\n".join(formatted)
-
-
-def build_user_prompt(
-    question: str,
-    json_objects: list[dict],
-    session_summary: dict,
-    retrieved_chunks: list[dict]
-) -> str:
-    """Build the complete user prompt."""
-    import json
-    
-    json_pretty = json.dumps(json_objects, indent=2) if json_objects else "[]"
-    
-    layer_counts = session_summary.get("layer_counts", {})
-    layer_counts_str = ", ".join(f"{k}={v}" for k, v in layer_counts.items()) if layer_counts else "None"
-    
-    limitations = session_summary.get("limitations", [])
-    limitations_str = ", ".join(limitations) if limitations else "None"
-    
-    chunks_formatted = format_retrieved_chunks(retrieved_chunks)
-    
-    return USER_PROMPT_TEMPLATE.format(
-        question=question,
-        json_objects_pretty=json_pretty,
-        layer_counts=layer_counts_str,
-        plot_boundary_present=session_summary.get("plot_boundary_present", False),
-        highways_present=session_summary.get("highways_present", False),
-        limitations=limitations_str,
-        retrieved_chunks_formatted=chunks_formatted
-    )
-
-
-def build_user_prompt_doc_only(question: str, retrieved_chunks: list[dict]) -> str:
-    """Build user prompt for definition-only questions: question + retrieved chunks only (no JSON/session summary)."""
-    chunks_formatted = format_retrieved_chunks(retrieved_chunks)
-    return USER_PROMPT_DOC_ONLY_TEMPLATE.format(
-        question=question,
-        retrieved_chunks_formatted=chunks_formatted
-    )

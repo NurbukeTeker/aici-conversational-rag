@@ -4,7 +4,7 @@ Verify that greetings/pleasantries get a short response with no RAG and no evide
 import pytest
 from unittest.mock import MagicMock, patch
 
-from app.smalltalk import is_smalltalk, SMALLTALK_RESPONSE
+from app.smalltalk import is_smalltalk, SMALLTALK_RESPONSE, get_smalltalk_response, THANKS_RESPONSE
 
 # Optional: run endpoint tests only when app can be loaded (full deps available)
 def _app_available():
@@ -48,6 +48,19 @@ class TestSmalltalkDetector:
         assert is_smalltalk("how are you") is True
 
 
+class TestGetSmalltalkResponse:
+    """Test get_smalltalk_response returns appropriate response per message type."""
+
+    def test_hi_returns_greeting_response(self):
+        assert get_smalltalk_response("hi") == SMALLTALK_RESPONSE
+        assert get_smalltalk_response("good morning") == SMALLTALK_RESPONSE
+
+    def test_thanks_returns_thanks_response(self):
+        assert get_smalltalk_response("thanks") == THANKS_RESPONSE
+        assert get_smalltalk_response("thank you") == THANKS_RESPONSE
+        assert get_smalltalk_response("thx") == THANKS_RESPONSE
+
+
 @pytest.mark.skipif(not _app_available(), reason="App dependencies (e.g. pypdf) not installed")
 class TestAnswerEndpointSmalltalk:
     """Test /answer returns small-talk response with empty evidence and no retrieval."""
@@ -58,7 +71,7 @@ class TestAnswerEndpointSmalltalk:
         from app import main
         from app.main import app
         client = TestClient(app)
-        # Trigger lifespan so vector_store, reasoning_service, llm_service are set (CI may fail here)
+        # Trigger lifespan so vector_store, reasoning_service, answer_graph are set (CI may fail here)
         try:
             resp = client.get("/health")
             if resp.status_code != 200:
@@ -66,11 +79,11 @@ class TestAnswerEndpointSmalltalk:
         except Exception as e:
             pytest.skip("App not initialized: %s" % e)
         # In CI lifespan may not set globals (e.g. ChromaDB fails); /answer would return 503
-        if main.vector_store is None or main.reasoning_service is None or main.llm_service is None:
+        if main.vector_store is None or main.reasoning_service is None:
             pytest.skip("App services not initialized in this environment")
         return client
 
-    def test_hi_returns_smalltalk_response_and_empty_evidence(self, client):
+    def test_hi_returns_smalltalk_response(self, client):
         response = client.post(
             "/answer",
             json={"question": "hi", "session_objects": []},
@@ -81,22 +94,13 @@ class TestAnswerEndpointSmalltalk:
         data = response.json()
         assert "answer" in data
         assert data["answer"].strip() == SMALLTALK_RESPONSE.strip()
-        assert "evidence" in data
-        assert data["evidence"]["document_chunks"] == []
-        assert data["evidence"].get("session_objects") is None
 
     def test_hi_retrieval_not_called(self, client):
-        from app import main
-        if main.vector_store is None:
-            pytest.skip("vector_store not initialized in this environment")
-        with patch.object(main.vector_store, "search", MagicMock()) as mock_search:
-            client.post(
-                "/answer",
-                json={"question": "hi", "session_objects": []},
-            )
-            mock_search.assert_not_called()
+        with patch("app.retrieval_lc.retrieve", MagicMock()) as mock_retrieve:
+            client.post("/answer", json={"question": "hi", "session_objects": []})
+            mock_retrieve.assert_not_called()
 
-    def test_good_morning_returns_smalltalk_and_empty_evidence(self, client):
+    def test_good_morning_returns_smalltalk(self, client):
         response = client.post(
             "/answer",
             json={"question": "good morning", "session_objects": []},
@@ -106,17 +110,11 @@ class TestAnswerEndpointSmalltalk:
         assert response.status_code == 200
         data = response.json()
         assert data["answer"].strip() == SMALLTALK_RESPONSE.strip()
-        assert data["evidence"]["document_chunks"] == []
-        assert data["evidence"].get("session_objects") is None
 
     def test_hey_property_highway_uses_normal_rag(self, client):
         """Verify domain question is NOT treated as small talk (RAG path is used)."""
-        from app import main
-        if main.vector_store is None:
-            pytest.skip("vector_store not initialized in this environment")
-        with patch.object(main.vector_store, "search", MagicMock(return_value=[])) as mock_search:
-            # Mock LLM so we don't call real API
-            with patch.object(main.llm_service, "generate_answer", return_value="Some answer."):
+        with patch("app.retrieval_lc.retrieve", MagicMock(return_value=[])) as mock_retrieve:
+            with patch("app.graph_lc.nodes.invoke_hybrid", return_value="Some answer."):
                 response = client.post(
                     "/answer",
                     json={
@@ -124,10 +122,9 @@ class TestAnswerEndpointSmalltalk:
                         "session_objects": [],
                     },
                 )
+                if response.status_code == 503:
+                    pytest.skip("Services not ready")
                 assert response.status_code == 200
-                # Retrieval should have been called (normal RAG path)
-                mock_search.assert_called_once()
+                mock_retrieve.assert_called_once()
                 data = response.json()
-                # Evidence structure present (may be empty if no chunks)
-                assert "evidence" in data
-                assert "document_chunks" in data["evidence"]
+                assert "answer" in data

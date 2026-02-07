@@ -14,6 +14,10 @@ _NEEDS_INPUT_PHRASES_EN = (
     r"what\s+is\s+needed",
     r"what'?s\s+missing",
     r"what\s+do\s+i\s+need",
+    r"what\s+is\s+missing",
+    r"what\s+is\s+missing\s+to\s+answer",
+    r"what\s+is\s+missing\s+to\s+answer\s+this",
+    r"what'?s\s+missing\s+to\s+answer",
 )
 
 # Turkish phrases

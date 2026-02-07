@@ -2,33 +2,21 @@
 import logging
 from pathlib import Path
 
-import chromadb
-from chromadb.config import Settings as ChromaSettings
-
 from .config import get_settings
+from .chroma_client import get_chroma_client
 
 logger = logging.getLogger(__name__)
 
 
 class VectorStoreService:
-    """Service for managing ChromaDB vector store."""
+    """Service for managing ChromaDB vector store (uses shared Chroma client)."""
     
     def __init__(self):
         settings = get_settings()
         self.persist_directory = Path(settings.chroma_persist_directory)
         self.collection_name = settings.chroma_collection_name
         
-        # Ensure directory exists
-        self.persist_directory.mkdir(parents=True, exist_ok=True)
-        
-        # Initialize ChromaDB client with persistence
-        self.client = chromadb.PersistentClient(
-            path=str(self.persist_directory),
-            settings=ChromaSettings(
-                anonymized_telemetry=False,
-                allow_reset=True
-            )
-        )
+        self.client = get_chroma_client()
         
         # Get or create collection
         self.collection = self.client.get_or_create_collection(

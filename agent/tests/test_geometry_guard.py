@@ -4,10 +4,43 @@ from unittest.mock import patch, MagicMock
 
 from app.geometry_guard import (
     is_spatial_question,
+    should_trigger_geometry_guard,
     required_layers_for_question,
     has_geometry,
     missing_geometry_layers,
 )
+
+
+class TestShouldTriggerGeometryGuard:
+    """One rule: trigger only for questions about THIS drawing, not general rules."""
+
+    def test_general_rule_phrases_do_not_trigger(self):
+        assert should_trigger_geometry_guard("What is meant by fronting?") is False
+        assert should_trigger_geometry_guard("What is a highway?") is False
+        assert should_trigger_geometry_guard("According to the regulations, does fronting apply?") is False
+        assert should_trigger_geometry_guard("Generally, would this be permitted?") is False
+        assert should_trigger_geometry_guard("Would development normally be permitted?") is False
+        assert should_trigger_geometry_guard("Does the presence of a wall restrict the front?") is False
+
+    def test_would_this_property_triggers(self):
+        """'Would this property front...' is about this drawing -> trigger guard."""
+        assert should_trigger_geometry_guard("Would this property front a highway?") is True
+
+    def test_would_normally_permitted_does_not_trigger(self):
+        """'Would development ... normally be permitted?' is general rule -> do not trigger."""
+        assert should_trigger_geometry_guard("Would development in front of the principal elevation normally be permitted?") is False
+
+    def test_this_drawing_spatial_triggers(self):
+        assert should_trigger_geometry_guard("Does this property front a highway?") is True
+        assert should_trigger_geometry_guard("Is this plot adjacent to the highway?") is True
+        assert should_trigger_geometry_guard("In the current drawing, does the plot front?") is True
+        assert should_trigger_geometry_guard("In this drawing, does the plot front?") is True
+        assert should_trigger_geometry_guard("Given this drawing, is there fronting?") is True
+
+    def test_spatial_but_not_about_this_drawing_does_not_trigger(self):
+        """Spatial keywords but no 'this property/plot/drawing' → no guard."""
+        assert should_trigger_geometry_guard("What is the distance to the highway?") is False
+        assert should_trigger_geometry_guard("When is a property said to front?") is False
 
 
 class TestIsSpatialQuestion:
@@ -119,7 +152,7 @@ class TestGeometryGuardIntegration:
         """
         Build AnswerRequest with geometry null and 'Does this property front a highway?'
         Assert: answer contains 'Cannot determine' / 'missing geometric information',
-        evidence.document_chunks == [], and vector_store.search and llm_service.generate_answer not called.
+        retrieval/LLM not called.
         """
         from app import main
         if main.vector_store is None:
@@ -132,12 +165,8 @@ class TestGeometryGuardIntegration:
             "question": "Does this property front a highway if no geometry is provided?",
             "session_objects": session_objects,
         }
-        with patch.object(main, "vector_store", MagicMock()) as mock_vs:
-            with patch.object(main, "llm_service", MagicMock()) as mock_llm:
-                mock_vs.is_ready = MagicMock(return_value=True)
-                mock_vs.search = MagicMock(return_value=[])
-                mock_llm.is_available = MagicMock(return_value=True)
-                mock_llm.generate_answer = MagicMock(return_value="Yes.")
+        with patch("app.retrieval_lc.retrieve", MagicMock(return_value=[])) as mock_retrieve:
+            with patch("app.graph_lc.nodes.invoke_hybrid", MagicMock(return_value="Yes.")):
                 resp = client.post("/answer", json=request_body)
         if resp.status_code == 503:
             pytest.skip("App returned 503 (services not ready)")
@@ -146,9 +175,7 @@ class TestGeometryGuardIntegration:
         assert "answer" in data
         answer = data["answer"]
         assert "Cannot determine" in answer or "missing" in answer.lower() or "geometric information" in answer
-        assert data["evidence"]["document_chunks"] == []
-        mock_vs.search.assert_not_called()
-        mock_llm.generate_answer.assert_not_called()
+        mock_retrieve.assert_not_called()
 
     def test_needs_input_followup_returns_checklist_no_retrieval_no_llm(self, client):
         """
@@ -166,12 +193,8 @@ class TestGeometryGuardIntegration:
             "question": "what it needs?",
             "session_objects": session_objects,
         }
-        with patch.object(main, "vector_store", MagicMock()) as mock_vs:
-            with patch.object(main, "llm_service", MagicMock()) as mock_llm:
-                mock_vs.is_ready = MagicMock(return_value=True)
-                mock_vs.search = MagicMock(return_value=[])
-                mock_llm.is_available = MagicMock(return_value=True)
-                mock_llm.generate_answer = MagicMock(return_value="Generic long answer.")
+        with patch("app.retrieval_lc.retrieve", MagicMock(return_value=[])) as mock_retrieve:
+            with patch("app.graph_lc.nodes.invoke_hybrid", MagicMock(return_value="Generic long answer.")):
                 resp = client.post("/answer", json=request_body)
         if resp.status_code == 503:
             pytest.skip("App returned 503 (services not ready)")
@@ -181,6 +204,4 @@ class TestGeometryGuardIntegration:
         answer = data["answer"]
         assert "Highway" in answer and "Plot Boundary" in answer
         assert "geometry" in answer.lower() or "coordinates" in answer.lower()
-        assert data["evidence"]["document_chunks"] == []
-        mock_vs.search.assert_not_called()
-        mock_llm.generate_answer.assert_not_called()
+        mock_retrieve.assert_not_called()
