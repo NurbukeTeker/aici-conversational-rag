@@ -5,7 +5,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
 from .config import get_settings
-from .prompts import SYSTEM_PROMPT, build_user_prompt
+from .prompts import SYSTEM_PROMPT, build_user_prompt, build_user_prompt_doc_only
 
 logger = logging.getLogger(__name__)
 
@@ -30,14 +30,18 @@ class LLMService:
         session_objects: list[dict],
         session_summary: dict,
         retrieved_chunks: list[dict],
+        doc_only: bool = False,
     ) -> str:
-        """Generate an answer using the LLM."""
-        user_prompt = build_user_prompt(
-            question=question,
-            json_objects=session_objects,
-            session_summary=session_summary,
-            retrieved_chunks=retrieved_chunks,
-        )
+        """Generate an answer using the LLM. If doc_only, prompt uses only question + chunks (no JSON/summary)."""
+        if doc_only:
+            user_prompt = build_user_prompt_doc_only(question=question, retrieved_chunks=retrieved_chunks)
+        else:
+            user_prompt = build_user_prompt(
+                question=question,
+                json_objects=session_objects,
+                session_summary=session_summary,
+                retrieved_chunks=retrieved_chunks,
+            )
         logger.info(f"Generating answer for question: {question[:100]}...")
         logger.debug(f"User prompt length: {len(user_prompt)} chars")
         messages = [
@@ -59,16 +63,21 @@ class LLMService:
         session_objects: list[dict],
         session_summary: dict,
         retrieved_chunks: list[dict],
+        doc_only: bool = False,
     ):
         """
         Generate an answer with streaming (async). Yields content chunks as they arrive.
+        If doc_only, prompt uses only question + chunks (no JSON/summary).
         """
-        user_prompt = build_user_prompt(
-            question=question,
-            json_objects=session_objects,
-            session_summary=session_summary,
-            retrieved_chunks=retrieved_chunks,
-        )
+        if doc_only:
+            user_prompt = build_user_prompt_doc_only(question=question, retrieved_chunks=retrieved_chunks)
+        else:
+            user_prompt = build_user_prompt(
+                question=question,
+                json_objects=session_objects,
+                session_summary=session_summary,
+                retrieved_chunks=retrieved_chunks,
+            )
         logger.info(f"Streaming answer for question: {question[:100]}...")
         messages = [
             SystemMessage(content=SYSTEM_PROMPT),

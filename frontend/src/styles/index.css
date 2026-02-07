@@ -19,6 +19,9 @@
   --color-border: #e2e2e2;
   --color-border-strong: #d0d0d0;
   
+  /* Question block: soft architectural warm neutral (no blue/SaaS) */
+  --color-chat-question: #f1ecec;
+  
   --color-success: #2d7a4f;
   --color-error: #c53030;
   --color-warning: #9a6700;
@@ -45,6 +48,8 @@
   
   --color-border: #2a2a2a;
   --color-border-strong: #3a3a3a;
+  
+  --color-chat-question: #252222;
   
   --color-success: #4ade80;
   --color-error: #f87171;
