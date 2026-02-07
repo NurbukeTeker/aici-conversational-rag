@@ -19,6 +19,7 @@ from .reasoning import ReasoningService
 from .llm_service import LLMService
 from .document_registry import DocumentRegistry
 from .sync_service import DocumentSyncService
+from . import smalltalk
 
 # Configure logging
 logging.basicConfig(
@@ -186,6 +187,16 @@ async def answer_question(request: AnswerRequest):
         if warnings:
             logger.warning(f"JSON validation warnings: {warnings}")
         
+        # Small-talk: return short friendly response without RAG or evidence
+        if smalltalk.is_smalltalk(request.question):
+            logger.info("Small-talk detected, skipping RAG")
+            session_summary = reasoning_service.compute_session_summary(request.session_objects)
+            return AnswerResponse(
+                answer=smalltalk.SMALLTALK_RESPONSE,
+                evidence=Evidence(document_chunks=[], session_objects=None),
+                session_summary=session_summary
+            )
+        
         # Compute session summary
         session_summary = reasoning_service.compute_session_summary(request.session_objects)
         logger.info(f"Session summary: {session_summary.layer_counts}")
@@ -265,6 +276,17 @@ async def _stream_answer_ndjson(request: AnswerRequest):
         if warnings:
             logger.warning(f"JSON validation warnings: {warnings}")
         session_summary = reasoning_service.compute_session_summary(request.session_objects)
+        # Small-talk: return fixed response without RAG or evidence
+        if smalltalk.is_smalltalk(request.question):
+            logger.info("Small-talk detected (stream), skipping RAG")
+            yield json.dumps({"t": "chunk", "c": smalltalk.SMALLTALK_RESPONSE}) + "\n"
+            yield json.dumps({
+                "t": "done",
+                "answer": smalltalk.SMALLTALK_RESPONSE,
+                "evidence": {"document_chunks": [], "session_objects": None},
+                "session_summary": session_summary.model_dump(),
+            }) + "\n"
+            return
         settings = get_settings()
         retrieved_chunks = vector_store.search(
             query=request.question,
