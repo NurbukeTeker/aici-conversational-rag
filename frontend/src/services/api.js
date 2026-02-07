@@ -11,6 +11,16 @@ class ApiError extends Error {
   }
 }
 
+/** Normalize backend error.detail (string or array of { msg }) for display. */
+function normalizeDetail(detail, fallback = 'Request failed') {
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    const parts = detail.map((e) => (e && e.msg) || (e && e.message) || JSON.stringify(e));
+    return parts.length ? parts.join('; ') : fallback;
+  }
+  return detail != null ? String(detail) : fallback;
+}
+
 async function request(endpoint, options = {}) {
   const token = localStorage.getItem('token');
   
@@ -29,7 +39,7 @@ async function request(endpoint, options = {}) {
     let message = 'Request failed';
     try {
       const error = await response.json();
-      message = error.detail || message;
+      message = normalizeDetail(error.detail, message);
     } catch {
       message = response.statusText;
     }
@@ -59,7 +69,7 @@ export const authApi = {
     }).then(async (res) => {
       if (!res.ok) {
         const error = await res.json();
-        throw new ApiError(error.detail || 'Login failed', res.status);
+        throw new ApiError(normalizeDetail(error.detail, 'Login failed'), res.status);
       }
       return res.json();
     });
@@ -133,7 +143,7 @@ export const exportApi = {
       let message = 'Export failed';
       try {
         const error = await response.json();
-        message = error.detail || message;
+        message = normalizeDetail(error.detail, message);
       } catch {
         message = response.statusText;
       }
@@ -165,7 +175,7 @@ export const exportApi = {
       let message = 'Export failed';
       try {
         const error = await response.json();
-        message = error.detail || message;
+        message = normalizeDetail(error.detail, message);
       } catch {
         message = response.statusText;
       }

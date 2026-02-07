@@ -322,10 +322,29 @@ class EmailValidator:
         return email.strip().lower()
 
 
-# Default validator instances
-password_validator = PasswordValidator()
-username_validator = UsernameValidator()
-email_validator = EmailValidator()
+# Validator instances wired to backend config (password/username policy)
+def _create_validators_from_config():
+    from .config import get_settings
+    s = get_settings()
+    return (
+        PasswordValidator(
+            min_length=s.password_min_length,
+            require_uppercase=s.password_require_uppercase,
+            require_lowercase=s.password_require_lowercase,
+            require_digit=s.password_require_digit,
+            require_special=s.password_require_special,
+        ),
+        UsernameValidator(
+            min_length=s.username_min_length,
+            max_length=s.username_max_length,
+        ),
+        EmailValidator(),
+    )
+
+_password_validator, _username_validator, _email_validator = _create_validators_from_config()
+password_validator = _password_validator
+username_validator = _username_validator
+email_validator = _email_validator
 
 
 def validate_registration(
