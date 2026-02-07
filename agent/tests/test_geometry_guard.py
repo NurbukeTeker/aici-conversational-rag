@@ -149,3 +149,38 @@ class TestGeometryGuardIntegration:
         assert data["evidence"]["document_chunks"] == []
         mock_vs.search.assert_not_called()
         mock_llm.generate_answer.assert_not_called()
+
+    def test_needs_input_followup_returns_checklist_no_retrieval_no_llm(self, client):
+        """
+        Session has Highway + Plot Boundary with geometry null.
+        Q "what it needs?" -> returns concise checklist, no document chunks, no retrieval/LLM.
+        """
+        from app import main
+        if main.vector_store is None:
+            pytest.skip("vector_store not initialized in this environment")
+        session_objects = [
+            {"layer": "Highway", "geometry": None, "type": "line"},
+            {"layer": "Plot Boundary", "geometry": None, "type": "polygon"},
+        ]
+        request_body = {
+            "question": "what it needs?",
+            "session_objects": session_objects,
+        }
+        with patch.object(main, "vector_store", MagicMock()) as mock_vs:
+            with patch.object(main, "llm_service", MagicMock()) as mock_llm:
+                mock_vs.is_ready = MagicMock(return_value=True)
+                mock_vs.search = MagicMock(return_value=[])
+                mock_llm.is_available = MagicMock(return_value=True)
+                mock_llm.generate_answer = MagicMock(return_value="Generic long answer.")
+                resp = client.post("/answer", json=request_body)
+        if resp.status_code == 503:
+            pytest.skip("App returned 503 (services not ready)")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "answer" in data
+        answer = data["answer"]
+        assert "Highway" in answer and "Plot Boundary" in answer
+        assert "geometry" in answer.lower() or "coordinates" in answer.lower()
+        assert data["evidence"]["document_chunks"] == []
+        mock_vs.search.assert_not_called()
+        mock_llm.generate_answer.assert_not_called()
