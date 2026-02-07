@@ -242,3 +242,85 @@ These go beyond a minimal hybrid RAG implementation:
 **License:** MIT
 
 **Secrets:** Set `OPENAI_API_KEY` (and optionally `JWT_SECRET_KEY`) in `.env`; do not commit `.env`. User data is stored in SQLite (`data/users.db`); session data in Redis with TTL.
+
+---
+
+## 14. UI Walkthrough & Demo Scenarios
+
+This section documents the user flow and demo scenarios with screenshots, showing what the UI looks like and what is demonstrated at each step.
+
+### 1) Authentication Flow
+
+#### Login
+
+Users log in with email/username and password. Authentication is JWT-based and handled by the backend.
+
+![Login Screen](./screenshots/login.png)
+
+#### Registration
+
+New users can register to create an account before logging in.
+
+![Registration Screen](./screenshots/register.png)
+
+### 2) First Login / Initial State
+
+#### Initial Dashboard View
+
+After first login, the user is taken to the main dashboard. The left side shows a default JSON object list (example drawing/session data). This JSON can be edited and updated between queries.
+
+![Initial Dashboard](./screenshots/dashboard-initial.png)
+
+#### Dark Mode
+
+The dashboard supports a dark theme; users can switch between light and dark mode.
+
+![Dark Mode](./screenshots/dark-mode.png)
+
+### 3) Question Types Demonstrated
+
+This section demonstrates the different question categories supported by the hybrid RAG system.
+
+#### JSON-only Questions
+
+These questions are answered purely from the session JSON. No document retrieval is involved. Example questions: “How many Highway objects are in the current drawing?” or “Which layers are present in the drawing?”
+
+![JSON-only Questions](./screenshots/json-only.png)
+
+#### Document-only Questions
+
+These questions are answered using the embedded regulatory PDF documents. No session JSON is required. Example questions: “What is the definition of a highway?” or “What does the regulation say about plot boundaries?”
+
+![Document-only Questions](./screenshots/doc-only.png)
+
+#### Hybrid Questions
+
+These questions combine document rules with the current session JSON. Geometry-dependent cases may trigger a deterministic “cannot determine” response if required data is missing.
+
+![Hybrid Questions](./screenshots/hybrid.png)
+
+#### General Rule Questions
+
+These questions ask for general regulatory rules (not drawing-specific). Answers explain the rule without requiring geometry.
+
+![General Rule Questions](./screenshots/general-rule.png)
+
+### 4) Session Update & Sensitivity
+
+#### Updating the Session JSON
+
+Users can modify the JSON object list and re-run the same question. Answers change immediately based on the updated session state.
+
+![Session Update](./screenshots/session-update.png)
+
+### 5) Export / Download
+
+#### Downloading Results
+
+Users can download or export results (e.g. JSON or Excel, depending on implementation).
+
+![Download / Export](./screenshots/download.png)
+
+### 6) Short UI Summary
+
+This minimal interface is intentionally simple and focuses on demonstrating the core hybrid RAG capabilities: reasoning over persistent documents, dynamic session data, and correct routing between question types.
