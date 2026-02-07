@@ -14,8 +14,7 @@ function getWsQaUrl() {
 
 
 /**
- * Parse LLM answer: keep only the narrative; remove Evidence section and everything after.
- * Evidence is shown in the dedicated Evidence panel from API.
+ * Parse LLM answer: keep only the narrative; remove any Evidence section or trailing boilerplate.
  */
 function parseAnswerNarrative(text) {
   if (!text || typeof text !== 'string') return text ?? '';
@@ -36,8 +35,9 @@ function parseAnswerNarrative(text) {
     if (i >= 0 && (cut < 0 || i < cut)) cut = i;
   }
   if (cut >= 0) text = text.slice(0, cut);
-  // Strip trailing Evidence markers
+  // Strip trailing Evidence markers and the old "Evidence section below" line
   text = text.replace(/\s*\*\*Evidence\s*\*\*:?\s*$/gim, '').trim();
+  text = text.replace(/\s*Relevant documents and JSON layers used are listed in the Evidence section below\.?\s*$/gi, '').trim();
   return text.trim();
 }
 
@@ -69,6 +69,7 @@ function Dashboard() {
   const streamingAnswerRef = useRef('');
   const streamingIntervalRef = useRef(null);
   const currentStreamingMsgIdRef = useRef(null); // so we can finalize when typing catches up
+  const streamedTextAccumulatorRef = useRef(''); // exact streamed text so "done" doesn't overwrite with shorter answer
   const wsRef = useRef(null);
   const [wsReady, setWsReady] = useState(false);
   const qaMessagesRef = useRef(null);
@@ -82,17 +83,6 @@ function Dashboard() {
   const [exportingExcel, setExportingExcel] = useState(false);
   const [exportingJson, setExportingJson] = useState(false);
   const [exportMessage, setExportMessage] = useState(null);
-
-  // Collapsible evidence: Set of message ids where evidence is collapsed
-  const [collapsedEvidenceIds, setCollapsedEvidenceIds] = useState(() => new Set());
-  const toggleEvidence = (msgId) => {
-    setCollapsedEvidenceIds(prev => {
-      const next = new Set(prev);
-      if (next.has(msgId)) next.delete(msgId);
-      else next.add(msgId);
-      return next;
-    });
-  };
 
   // Load session objects on mount
   useEffect(() => {
@@ -257,12 +247,12 @@ function Dashboard() {
     if (ws && ws.readyState === WebSocket.OPEN) {
       // Real-time path: stream via WebSocket
       currentStreamingMsgIdRef.current = msgId;
+      streamedTextAccumulatorRef.current = '';
       setStreamingAnswer('');
       setMessages(prev => [...prev, {
         id: msgId,
         question: currentQuestion,
         answer: '',
-        evidence: null,
         sessionSummary: null,
         streaming: true
       }]);
@@ -270,19 +260,18 @@ function Dashboard() {
         try {
           const data = JSON.parse(event.data);
           if (data.t === 'chunk') {
-            setStreamingAnswer(prev => prev + (data.c || ''));
+            const c = data.c || '';
+            streamedTextAccumulatorRef.current += c;
+            setStreamingAnswer(prev => prev + c);
           } else if (data.t === 'done') {
             ws.removeEventListener('message', handler);
-            // Keep streaming: true and keep streamingAnswer — typing continues until animation catches up
+            const doneAnswer = data.answer ?? '';
+            const streamedSoFar = streamedTextAccumulatorRef.current;
+            const finalAnswer = streamedSoFar.length >= doneAnswer.length ? streamedSoFar : doneAnswer;
+            setStreamingAnswer(prev => (finalAnswer.length > prev.length ? finalAnswer : prev));
             setMessages(prev => prev.map(m =>
               m.id === msgId
-                ? {
-                    ...m,
-                    answer: data.answer ?? '',
-                    evidence: data.evidence ?? null,
-                    sessionSummary: data.session_summary ?? null,
-                    streaming: true
-                  }
+                ? { ...m, answer: finalAnswer, sessionSummary: data.session_summary ?? null, streaming: true }
                 : m
             ));
             setAsking(false);
@@ -296,7 +285,7 @@ function Dashboard() {
             currentStreamingMsgIdRef.current = null;
             setMessages(prev => prev.map(m =>
               m.id === msgId
-                ? { ...m, answer: `Error: ${data.message || 'Stream failed'}`, evidence: null, streaming: false }
+                ? { ...m, answer: `Error: ${data.message || 'Stream failed'}`, streaming: false }
                 : m
             ));
             setStreamingAnswer('');
@@ -317,22 +306,14 @@ function Dashboard() {
       id: msgId,
       question: currentQuestion,
       answer: '',
-      evidence: null,
       sessionSummary: null,
       streaming: true
     }]);
     try {
       const response = await qaApi.ask(currentQuestion);
-      // Keep streaming: true and feed answer into typing effect so it types out like WebSocket
       setMessages(prev => prev.map(m =>
         m.id === msgId
-          ? {
-              ...m,
-              answer: response.answer,
-              evidence: response.evidence,
-              sessionSummary: response.session_summary,
-              streaming: true
-            }
+          ? { ...m, answer: response.answer, sessionSummary: response.session_summary, streaming: true }
           : m
       ));
       setStreamingAnswer(response.answer || '');
@@ -344,7 +325,7 @@ function Dashboard() {
       currentStreamingMsgIdRef.current = null;
       setMessages(prev => prev.map(m =>
         m.id === msgId
-          ? { ...m, answer: `Error: ${err instanceof ApiError ? err.message : 'Failed to get answer'}`, evidence: null, streaming: false }
+          ? { ...m, answer: `Error: ${err instanceof ApiError ? err.message : 'Failed to get answer'}`, streaming: false }
           : m
       ));
     } finally {
@@ -366,11 +347,10 @@ function Dashboard() {
     return messages
       .filter(msg => !msg.streaming)
       .map(msg => ({
-      question: msg.question,
-      answer: msg.answer,
-      evidence: msg.evidence || null,
-      timestamp: new Date(msg.id).toISOString()
-    }));
+        question: msg.question,
+        answer: msg.answer,
+        timestamp: new Date(msg.id).toISOString()
+      }));
   };
 
   // Get session summary for export
@@ -640,72 +620,6 @@ function Dashboard() {
                           parseAnswerNarrative(msg.answer)
                         )}
                       </div>
-
-                      {msg.evidence && !msg.streaming && (msg.evidence.document_chunks?.length > 0 || msg.evidence.session_objects) && (
-                        <div className="qa-evidence">
-                          <div
-                            className="qa-evidence-title"
-                            role="button"
-                            tabIndex={0}
-                            onClick={() => toggleEvidence(msg.id)}
-                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleEvidence(msg.id); } }}
-                            aria-expanded={!collapsedEvidenceIds.has(msg.id)}
-                          >
-                            <span className="qa-evidence-chevron" aria-hidden>
-                              {collapsedEvidenceIds.has(msg.id) ? '▶' : '▼'}
-                            </span>
-                            <strong>Evidence:</strong>
-                          </div>
-                          {!collapsedEvidenceIds.has(msg.id) && (
-                            <>
-                          {msg.evidence.document_chunks?.length > 0 && (
-                            <>
-                              <div className="qa-evidence-subtitle"><strong>Document Excerpts Used:</strong></div>
-                              <ul className="qa-evidence-list">
-                                {msg.evidence.document_chunks.map((chunk, i) => (
-                                  <li key={i} className="qa-evidence-item">
-                                    [{chunk.chunk_id || chunk.source} | p{chunk.page || '?'}]: {chunk.text_snippet || `${chunk.section || 'general'}`}
-                                  </li>
-                                ))}
-                              </ul>
-                            </>
-                          )}
-                          {msg.evidence.session_objects && (() => {
-                            const so = msg.evidence.session_objects;
-                            const labels = so.object_labels || [];
-                            const indices = so.object_indices || [];
-                            const layers = so.layers_used || [];
-                            const byLayer = {};
-                            layers.forEach((layer, i) => {
-                              if (!byLayer[layer]) byLayer[layer] = { indices: [], labels: [] };
-                              byLayer[layer].indices.push(indices[i]);
-                              byLayer[layer].labels.push(labels[i]);
-                            });
-                            return (
-                              <>
-                                <div className="qa-evidence-subtitle"><strong>JSON Objects/Layers Used:</strong></div>
-                                <ul className="qa-evidence-list">
-                                  {Object.entries(byLayer).map(([layer, { indices: idxs, labels: lbs }]) => {
-                                    const indexStr = idxs.length <= 2
-                                      ? idxs.join(' and ')
-                                      : idxs.slice(0, -1).join(', ') + ' and ' + idxs[idxs.length - 1];
-                                    const labelPart = lbs.some(Boolean)
-                                      ? ` (for ${lbs.filter(Boolean).map((l) => `"${l}"`).join(' and ')})`
-                                      : '';
-                                    return (
-                                      <li key={layer} className="qa-evidence-item">
-                                        {layer} layer, indices {indexStr}{labelPart}.
-                                      </li>
-                                    );
-                                  })}
-                                </ul>
-                              </>
-                            );
-                          })()}
-                            </>
-                          )}
-                        </div>
-                      )}
                     </div>
                   </div>
                 ))

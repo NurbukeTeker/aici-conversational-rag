@@ -1,6 +1,6 @@
 """Pydantic models for Agent service."""
 from pydantic import BaseModel, Field
-from typing import Any
+from typing import Any, Literal
 
 
 class SessionSummary(BaseModel):
@@ -21,32 +21,10 @@ class AnswerRequest(BaseModel):
     )
 
 
-class ChunkEvidence(BaseModel):
-    """Evidence from a retrieved document chunk."""
-    chunk_id: str
-    source: str
-    page: str | None = None
-    section: str | None = None
-    text_snippet: str
-
-
-class ObjectEvidence(BaseModel):
-    """Evidence from session objects."""
-    layers_used: list[str]
-    object_indices: list[int]
-    object_labels: list[str] = Field(default_factory=list, description="Optional names from properties.name per index")
-
-
-class Evidence(BaseModel):
-    """Combined evidence for answer."""
-    document_chunks: list[ChunkEvidence] = Field(default_factory=list)
-    session_objects: ObjectEvidence | None = None
-
-
 class AnswerResponse(BaseModel):
     """Response model for /answer endpoint."""
     answer: str
-    evidence: Evidence
+    query_mode: Literal["doc_only", "json_only", "hybrid"] | None = Field(default=None, description="From routing")
     session_summary: SessionSummary | None = None
 
 

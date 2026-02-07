@@ -96,7 +96,8 @@ class PDFIngestionService:
                 metadata = {
                     "source": source,
                     "page": str(page_num),
-                    "chunk_index": chunk_counter
+                    "chunk_index": chunk_counter,
+                    "chunk_id": chunk_id,
                 }
                 # Only add section if it's not None
                 if section is not None:
