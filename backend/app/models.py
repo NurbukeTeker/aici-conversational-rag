@@ -326,9 +326,9 @@ class SessionSummary(BaseModel):
 
 
 class QAResponse(BaseModel):
-    """Question-answer response."""
+    """Question-answer response. Agent does not return evidence; backend defaults it so /qa works."""
     answer: str
-    evidence: Evidence
+    evidence: Evidence = Field(default_factory=lambda: Evidence(document_chunks=[], session_objects=None, query_mode=None))
     session_summary: SessionSummary | None = None
 
 
