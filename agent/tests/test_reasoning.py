@@ -67,38 +67,6 @@ class TestReasoningService:
         
         assert len(warnings) == 1
         assert "must be a list" in warnings[0]
-    
-    def test_extract_layers_used_with_highway_question(self):
-        """Test layer extraction for highway-related question."""
-        objects = [
-            {"layer": "Highway", "type": "line"},
-            {"layer": "Walls", "type": "line"},
-            {"layer": "Plot Boundary", "type": "polygon"},
-        ]
-        
-        layers, indices = self.service.extract_layers_used(
-            objects, 
-            "Does this property front a highway?"
-        )
-        
-        assert "Highway" in layers
-        assert 0 in indices  # Highway is at index 0
-    
-    def test_extract_layers_used_no_specific_keywords(self):
-        """Test layer extraction with general question."""
-        objects = [
-            {"layer": "Highway", "type": "line"},
-            {"layer": "Walls", "type": "line"},
-        ]
-        
-        layers, indices = self.service.extract_layers_used(
-            objects,
-            "What can you tell me about this drawing?"
-        )
-        
-        # Should include all layers when no specific keywords
-        assert len(layers) == 2
-        assert len(indices) == 2
 
     def test_geometry_null_reports_no_coordinate_limitation(self):
         """geometry: null -> should report 'No coordinate/geometry data found'."""

@@ -177,23 +177,19 @@ Folder-level, file-by-file documentation for `agent/app/`. All claims are derive
 
 ## agent/app/reasoning.py
 
-**Purpose:** Session summary computation, JSON schema validation, layer extraction for evidence. No LLM calls.
+**Purpose:** Session summary computation and JSON schema validation. No LLM calls.
 
 **Key classes/functions:**
-- `ReasoningService` — `compute_session_summary`, `_detect_limitations`, `_object_has_geometry`, `extract_layers_used`, `validate_json_schema`.
-- `KNOWN_LAYERS` — Set of layer names (Highway, Plot Boundary, Walls, etc.).
+- `ReasoningService` — `compute_session_summary`, `_detect_limitations`, `_object_has_geometry`, `validate_json_schema`.
 
 **Inputs/outputs:**
 - `compute_session_summary(session_objects)`: outputs `SessionSummary` (layer_counts, plot_boundary_present, highways_present, total_objects, limitations).
 - `_object_has_geometry(obj)`: checks `geometry.coordinates` or top-level `coordinates`.
-- `extract_layers_used(session_objects, question)`: returns (layers_used, indices_used) based on keyword matching.
-- `validate_json_schema`: returns list of warning strings.
+- `validate_json_schema(session_objects)`: returns list of warning strings.
 
 **Callers:** `graph_lc/nodes.py` (validate_node, summarize_node, finalize_node).
 
 **Edge cases / errors:** Empty session returns SessionSummary with limitations. Handles both "layer" and "Layer" keys.
-
-**Potential refactors:** `extract_layers_used` used for evidence extraction; agent does not currently return evidence. Keyword mapping hardcoded.
 
 ---
 
@@ -279,7 +275,7 @@ Folder-level, file-by-file documentation for `agent/app/`. All claims are derive
 **Purpose:** Handles "what's needed?"-style follow-ups after geometry guard. Returns checklist without retrieval/LLM.
 
 **Key functions:**
-- `is_needs_input_followup(question)` — Regex match for English/Turkish phrases (e.g. "what do you need", "ne lazım").
+- `is_needs_input_followup(question)` — Regex match for English phrases (e.g. "what do you need", "what's missing").
 - `get_missing_geometry_layers(session_objects)` — Uses geometry_guard logic.
 - `build_needs_input_message(missing_layers)` — Checklist string.
 

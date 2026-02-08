@@ -206,6 +206,7 @@ class DrawingObject(BaseModel):
         return v
 
     model_config = ConfigDict(
+        extra="forbid",  # Reject unknown keys (e.g. typex, layerxxx) so user gets key error
         json_schema_extra={
             "examples": [
                 {

@@ -28,7 +28,7 @@ SMALLTALK_RESPONSE = (
     "What would you like to check?"
 )
 
-# Teşekkür/thanks için uygun cevap
+# Appropriate response for thanks/gratitude
 THANKS_PHRASES = frozenset({
     "thanks", "thank you", "thx", "thanks!", "thank you!",
 })

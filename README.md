@@ -90,7 +90,7 @@ This project implements a **hybrid Retrieval-Augmented Generation (RAG)** system
 | PUT | `/session/objects` | Update session JSON objects |
 | GET | `/session/objects` | Get current session objects |
 | POST | `/qa` | Ask a question (hybrid RAG) |
-| WebSocket | `/ws/qa` | Streaming Q&A (token in query) |
+| WebSocket | `/ws/qa` | Streaming Q&A (auth via first message) |
 
 **Agent (Port 8001)**
 

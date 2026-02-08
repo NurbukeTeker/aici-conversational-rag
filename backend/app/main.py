@@ -46,10 +46,27 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     """Handle Pydantic validation errors with field-level details."""
     details = []
     for error in exc.errors():
+        msg = error.get("msg", "Validation error")
+        err_type = error.get("type", "value_error")
+        # Make "extra keys" errors clear as key error for session objects
+        if err_type == "extra_forbidden":
+            loc = list(error.get("loc", []))
+            if "objects" in str(loc) and len(loc) > 0:
+                invalid_key = loc[-1] if isinstance(loc[-1], str) else None
+                if invalid_key:
+                    msg = (
+                        f"Invalid key '{invalid_key}' in drawing object. "
+                        "Allowed keys only: type, layer, geometry, properties."
+                    )
+                else:
+                    msg = (
+                        "Invalid key(s) in drawing object. "
+                        "Allowed keys only: type, layer, geometry, properties."
+                    )
         details.append({
             "loc": list(error.get("loc", [])),
-            "msg": error.get("msg", "Validation error"),
-            "type": error.get("type", "value_error")
+            "msg": msg,
+            "type": err_type
         })
     
     # Check if this is about session objects
@@ -60,6 +77,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         content={
             "error": "VALIDATION_ERROR",
             "message": "Invalid request data. Please check the format and try again.",
+            "detail": details,  # Frontend normalizeDetail() uses this to show msg(s)
             "details": details,
             "example": EXAMPLE_DRAWING_OBJECTS if is_session_error else None
         }
@@ -542,23 +560,31 @@ async def ask_question(
 async def websocket_qa(websocket: WebSocket):
     """
     Real-time Q&A over WebSocket.
-    Authenticate with token in query: /ws/qa?token=<jwt>.
-    Send JSON messages: {"question": "..."}. Receive NDJSON stream: {"t":"chunk","c":"..."} then {"t":"done",...}.
+    Auth via first message (avoids token in URL/logs): send {"type": "auth", "token": "<jwt>"} once, then {"question": "..."}.
+    Receive NDJSON stream: {"t":"chunk","c":"..."} then {"t":"done",...}.
     """
-    token = websocket.query_params.get("token")
-    if not token:
-        await websocket.close(code=4001)
-        return
+    await websocket.accept()
+    # First message must be auth (token not in URL so it does not appear in access logs)
     try:
+        raw = await websocket.receive_text()
+        data = json.loads(raw)
+        if data.get("type") != "auth":
+            await websocket.send_json({"t": "error", "message": "First message must be {\"type\": \"auth\", \"token\": \"<jwt>\"}"})
+            await websocket.close(code=4001)
+            return
+        token = data.get("token") or ""
+        if not token:
+            await websocket.send_json({"t": "error", "message": "Missing token in auth message"})
+            await websocket.close(code=4001)
+            return
         token_data = decode_token(token)
+        if not token_data.user_id:
+            await websocket.close(code=4001)
+            return
     except Exception:
         await websocket.close(code=4001)
         return
-    if not token_data.user_id:
-        await websocket.close(code=4001)
-        return
 
-    await websocket.accept()
     session_service = get_session_service()
     settings = get_settings()
 

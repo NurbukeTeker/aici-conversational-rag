@@ -105,8 +105,8 @@ The **AICI Hybrid RAG** system answers planning-regulation questions by combinin
 
 | Step | Component | Action | Code Path |
 |------|-----------|--------|-----------|
-| 1 | Frontend | Connect `ws://host/api/ws/qa?token=<jwt>` | `frontend/src/pages/Dashboard.jsx:getWsQaUrl()` |
-| 2 | Backend | Decode JWT, accept WS, forward to Agent stream | `backend/app/main.py:websocket_qa()` |
+| 1 | Frontend | Connect `ws://host/api/ws/qa`, then send `{type:"auth",token:"<jwt>"}` as first message | `frontend/src/pages/Dashboard.jsx:getWsQaUrl()` + onopen |
+| 2 | Backend | Accept WS, require first message auth; decode JWT, then forward to Agent stream | `backend/app/main.py:websocket_qa()` |
 | 3 | Backend | `httpx.stream(POST agent/answer/stream)` | `backend/app/main.py:447-458` |
 | 4 | Backend | For each NDJSON line from Agent, `websocket.send_json(obj)` | `backend/app/main.py:459-466` |
 | 5 | Agent | `run_graph_until_route()` + `astream_doc_only` / `astream_hybrid` | `agent/app/rag/orchestrator.py:stream_answer_ndjson()` (called from main.py) |
@@ -157,7 +157,7 @@ The **AICI Hybrid RAG** system answers planning-regulation questions by combinin
 | `/auth/check-password` | No | POST | Password strength |
 | `/session/objects` | Bearer | PUT, GET | Update/get session JSON |
 | `/qa` | Bearer | POST | Ask question (REST) |
-| `/ws/qa` | Query token | WS | Streaming Q&A |
+| `/ws/qa` | First-message auth | WS | Streaming Q&A |
 | `/health` | No | GET | Redis + agent status |
 | `/export/excel` | Bearer | POST | Download Excel |
 | `/export/json` | Bearer | POST | Download JSON |
@@ -283,7 +283,7 @@ The agent **does not** return structured evidence. `AnswerResponse` has `answer`
 
 ### 6.3 Streaming UI
 
-- WebSocket: `ws://host/api/ws/qa?token=...`. On `t:chunk`, append `data.c` to `streamingAnswer`.
+- WebSocket: `ws://host/api/ws/qa`; first message `{type:"auth",token:"..."}`. On `t:chunk`, append `data.c` to `streamingAnswer`.
 - Human-speed reveal: ~35 chars/sec via `setInterval` and `streamingDisplayLength` — `Dashboard.jsx:147-184`.
 - Finalize on `t:done`; REST fallback streams full answer then shows it.
 

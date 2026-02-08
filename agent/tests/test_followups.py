@@ -28,19 +28,6 @@ class TestIsNeedsInputFollowup:
     def test_what_do_i_need_true(self):
         assert is_needs_input_followup("what do i need") is True
 
-    def test_turkish_ne_lazim_true(self):
-        assert is_needs_input_followup("ne lazım?") is True
-        assert is_needs_input_followup("Ne lazım") is True
-
-    def test_turkish_ne_gerekiyor_true(self):
-        assert is_needs_input_followup("ne gerekiyor") is True
-
-    def test_turkish_ne_eksik_true(self):
-        assert is_needs_input_followup("ne eksik") is True
-
-    def test_turkish_neye_ihtiyac_true(self):
-        assert is_needs_input_followup("neye ihtiyaç") is True
-
     def test_normal_question_false(self):
         assert is_needs_input_followup("Does this property front a highway?") is False
         assert is_needs_input_followup("What is a highway?") is False

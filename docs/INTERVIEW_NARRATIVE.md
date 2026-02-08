@@ -22,7 +22,7 @@ A speak-aloud script for presenting the AICI Hybrid RAG system. Every factual cl
 **User action in UI:** User types a question in the Q&A panel. The frontend prefers WebSocket when connected—`frontend/src/pages/Dashboard.jsx:247`—otherwise falls back to REST.
 
 **Frontend → Backend:**  
-- WebSocket: connects to `/api/ws/qa?token=<jwt>`. Token in query; backend decodes JWT in `backend/app/main.py:434-441`.  
+- WebSocket: connects to `/api/ws/qa`, then sends first message `{type:"auth",token:"<jwt>"}`; backend validates and decodes JWT in `backend/app/main.py:websocket_qa()`.  
 - REST: `POST /api/qa` with Bearer token. Backend loads session from Redis—`session_service.get_objects(user_id)` in `backend/app/main.py:510`—and forwards `{question, session_objects}` to the Agent.
 
 **Backend → Agent:**  
@@ -95,7 +95,7 @@ User → Frontend (React) → Backend (FastAPI) → Agent (FastAPI + LangGraph)
 
 ### G. Streaming Path (If Implemented)
 
-*"Implemented. Frontend connects WebSocket `/api/ws/qa?token=<jwt>`. Backend decodes token, accepts WS, streams POST to Agent `/answer/stream`. Agent uses `rag.orchestrator.stream_answer_ndjson()`: runs `run_graph_until_route`—`agent/app/graph_lc/graph_builder.py:run_graph_until_route`—then streams via `astream_doc_only` or `astream_hybrid` from `agent/app/rag/chains.py`. NDJSON: `{\"t\":\"chunk\",\"c\":\"...\"}` then `{\"t\":\"done\",\"answer\":\"...\",\"session_summary\":{...}}`. Backend forwards each line. Frontend appends chunks; human-speed reveal ~35 chars/sec—`frontend/src/pages/Dashboard.jsx:147-184`."*
+*"Implemented. Frontend connects WebSocket `/api/ws/qa`, sends first message `{type:\"auth\",token:\"<jwt>\"}`. Backend validates token, accepts WS, streams POST to Agent `/answer/stream`. Agent uses `rag.orchestrator.stream_answer_ndjson()`: runs `run_graph_until_route`—`agent/app/graph_lc/graph_builder.py:run_graph_until_route`—then streams via `astream_doc_only` or `astream_hybrid` from `agent/app/rag/chains.py`. NDJSON: `{\"t\":\"chunk\",\"c\":\"...\"}` then `{\"t\":\"done\",\"answer\":\"...\",\"session_summary\":{...}}`. Backend forwards each line. Frontend appends chunks; human-speed reveal ~35 chars/sec—`frontend/src/pages/Dashboard.jsx:147-184`."*
 
 ### H. Failure Modes + Deterministic Guards
 
@@ -168,7 +168,7 @@ A: `JWT_SECRET_KEY` from env; default `change-this-secret-key-in-production`. `b
 A: No. JWT expiry controlled by `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` (default 60). User must re-login on expiry.
 
 **Q: How does the WebSocket authenticate?**  
-A: Token in query string: `/ws/qa?token=<jwt>`. Backend decodes with `decode_token()` before accepting—`backend/app/main.py:434-441`. No Bearer header for WS.
+A: First message after connect must be `{type:"auth",token:"<jwt>"}`. Backend validates with `decode_token()` and closes with code 4001 if invalid—`backend/app/main.py:websocket_qa()`. No Bearer header for WS.
 
 ### Session Consistency & Concurrency
 

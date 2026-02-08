@@ -107,6 +107,31 @@ class TestDrawingObjectValidation:
         obj = DrawingObject(type="LINE", layer="Walls")
         assert obj.geometry is None
 
+    def test_extra_keys_forbidden(self):
+        """Test that invalid keys (e.g. typex, layerxxx) cause validation error."""
+        with pytest.raises(ValidationError) as exc_info:
+            DrawingObject(**{"type": "LINE", "layer": "Walls", "typex": "polygon"})
+        errors = exc_info.value.errors()
+        assert any(e.get("type") == "extra_forbidden" for e in errors)
+        assert any("typex" in str(e.get("loc", [])) for e in errors)
+
+    def test_multiple_extra_keys_forbidden(self):
+        """Test that multiple invalid keys (typex, layerxxx) cause validation errors."""
+        with pytest.raises(ValidationError) as exc_info:
+            DrawingObject(**{
+                "typex": "polygon",
+                "layerxxx": "Plot Boundary",
+                "geometry": None,
+                "properties": {"area": 450},
+            })
+        errors = exc_info.value.errors()
+        # Should have extra_forbidden for typex and layerxxx, and missing type/layer
+        extra_errors = [e for e in errors if e.get("type") == "extra_forbidden"]
+        assert len(extra_errors) >= 2  # typex and layerxxx
+        locs = [e.get("loc", ()) for e in extra_errors]
+        assert any("typex" in str(loc) for loc in locs)
+        assert any("layerxxx" in str(loc) for loc in locs)
+
 
 class TestSessionObjectsValidation:
     """Test SessionObjects (list of objects) validation."""
