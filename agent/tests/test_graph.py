@@ -27,8 +27,8 @@ class TestAnswerEndpoints:
     def test_smalltalk_returns_smalltalk_response_no_retrieval_llm(self, client):
         """Test 1: smalltalk -> returns SMALLTALK_RESPONSE, no retrieval/LLM."""
         with patch("app.rag.retrieval.retrieve", MagicMock(return_value=[])) as mock_retrieve:
-            with patch("app.lc.chains.invoke_doc_only", MagicMock(return_value="")) as mock_llm:
-                with patch("app.lc.chains.invoke_hybrid", MagicMock(return_value="")):
+            with patch("app.rag.chains.invoke_doc_only", MagicMock(return_value="")) as mock_llm:
+                with patch("app.rag.chains.invoke_hybrid", MagicMock(return_value="")):
                     resp = client.post(
                         "/answer",
                         json={"question": "hi", "session_objects": []},
@@ -44,7 +44,7 @@ class TestAnswerEndpoints:
     def test_missing_geometry_returns_deterministic_guard_message(self, client):
         """Test 2: missing geometry -> returns deterministic guard message."""
         with patch("app.rag.retrieval.retrieve", MagicMock(return_value=[])):
-            with patch("app.lc.chains.invoke_hybrid", MagicMock(return_value="Yes.")):
+            with patch("app.rag.chains.invoke_hybrid", MagicMock(return_value="Yes.")):
                 session_objects = [
                     {"layer": "Highway", "geometry": None, "type": "line"},
                     {"layer": "Plot Boundary", "geometry": None, "type": "polygon"},
@@ -88,8 +88,8 @@ class TestAnswerEndpoints:
             {"id": "chunk_1", "source": "doc", "page": "1", "section": "A", "text": "A highway is a public road.", "distance": 0.1}
         ]
         with patch("app.rag.retrieval.retrieve", MagicMock(return_value=mock_chunks)):
-            with patch("app.lc.chains.invoke_doc_only", MagicMock(return_value="A highway is...")) as mock_doc:
-                with patch("app.lc.chains.invoke_hybrid", MagicMock(return_value="Hybrid answer.")):
+            with patch("app.rag.chains.invoke_doc_only", MagicMock(return_value="A highway is...")) as mock_doc:
+                with patch("app.rag.chains.invoke_hybrid", MagicMock(return_value="Hybrid answer.")):
                     resp = client.post(
                         "/answer",
                         json={
@@ -107,7 +107,7 @@ class TestAnswerEndpoints:
     def test_doc_only_empty_retrieval_returns_override_message(self, client):
         """DOC_ONLY with no retrieved docs: answer is override message."""
         with patch("app.rag.retrieval.retrieve", MagicMock(return_value=[])):
-            with patch("app.lc.chains.invoke_hybrid", MagicMock(return_value="Hybrid.")):
+            with patch("app.rag.chains.invoke_hybrid", MagicMock(return_value="Hybrid.")):
                 resp = client.post(
                     "/answer",
                     json={"question": "what is definition of highway?", "session_objects": []},
@@ -122,13 +122,13 @@ class TestAnswerEndpoints:
 
     def test_doc_only_term_not_in_chunks_rest_returns_not_found(self, client):
         """DOC_ONLY when asked term is not in retrieved chunks: REST returns same not-found message (guard applied)."""
-        from app.lc.chains import DOC_ONLY_EMPTY_MESSAGE
+        from app.rag.chains import DOC_ONLY_EMPTY_MESSAGE
         # Chunks that do NOT contain "side elevation"
         mock_chunks = [
             {"id": "1", "source": "doc", "page": "1", "text": "Principal elevation fronts the highway.", "distance": 0.2},
         ]
         with patch("app.rag.retrieval.retrieve", MagicMock(return_value=mock_chunks)):
-            with patch("app.lc.chains.invoke_doc_only", MagicMock(return_value="Hallucinated definition.")) as mock_doc:
+            with patch("app.rag.chains.invoke_doc_only", MagicMock(return_value="Hallucinated definition.")) as mock_doc:
                 resp = client.post(
                     "/answer",
                     json={"question": "What is meant by 'side elevation'?", "session_objects": []},
@@ -141,7 +141,7 @@ class TestAnswerEndpoints:
 
     def test_doc_only_term_not_in_chunks_streaming_same_answer(self, client):
         """DOC_ONLY when term not in chunks: streaming done payload has same not-found message as REST (guard applied)."""
-        from app.lc.chains import DOC_ONLY_EMPTY_MESSAGE
+        from app.rag.chains import DOC_ONLY_EMPTY_MESSAGE
         mock_chunks = [
             {"id": "1", "source": "doc", "page": "1", "text": "Principal elevation only.", "distance": 0.2},
         ]
@@ -164,7 +164,7 @@ class TestAnswerEndpoints:
             {"id": "chunk_1", "source": "doc", "page": "1", "section": "A", "text": "Planning rules.", "distance": 0.1}
         ]
         with patch("app.rag.retrieval.retrieve", MagicMock(return_value=mock_chunks)) as mock_retrieve:
-            with patch("app.lc.chains.invoke_hybrid", MagicMock(return_value="The extension complies.")):
+            with patch("app.rag.chains.invoke_hybrid", MagicMock(return_value="The extension complies.")):
                 session_objects = [
                     {"layer": "Extension", "geometry": {"coordinates": [[0, 0], [1, 0], [1, 1]]}, "properties": {"name": "Ext1"}},
                     {"layer": "Plot Boundary", "geometry": {"coordinates": [[0, 0], [10, 0]]}},
@@ -186,7 +186,7 @@ class TestAnswerEndpoints:
     def test_json_only_question_returns_answer(self, client):
         """JSON-only (e.g. how many layers) returns answer, no retrieval."""
         with patch("app.rag.retrieval.retrieve", MagicMock(return_value=[])) as mock_retrieve:
-            with patch("app.lc.chains.invoke_hybrid", MagicMock(return_value="There are 3 layers.")):
+            with patch("app.rag.chains.invoke_hybrid", MagicMock(return_value="There are 3 layers.")):
                 session_objects = [
                     {"layer": "Highway", "geometry": None},
                     {"layer": "Plot Boundary", "geometry": None},
@@ -211,7 +211,7 @@ class TestAnswerEndpoints:
         with patch("app.rag.retrieval.retrieve", MagicMock(return_value=[
             {"id": "c1", "source": "doc", "page": "1", "section": "A", "text": "A highway is a road.", "distance": 0.1}
         ])):
-            with patch("app.main.astream_doc_only") as mock_astream:
+            with patch("app.rag.chains.astream_doc_only") as mock_astream:
                 async def _stream(*args, **kwargs):
                     for token in ["A ", "highway ", "is ", "a road."]:
                         yield token
