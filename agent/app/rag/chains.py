@@ -9,7 +9,23 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnableSequence
 from langchain_openai import ChatOpenAI
 
-from .prompts import DOC_ONLY_PROMPT, HYBRID_PROMPT, format_chunk_for_prompt
+from langchain_core.prompts import ChatPromptTemplate
+
+from .prompts import (
+    SYSTEM_PROMPT,
+    HYBRID_HUMAN_TEMPLATE,
+    DOC_ONLY_HUMAN_TEMPLATE,
+    format_chunk_for_prompt,
+)
+
+HYBRID_PROMPT = ChatPromptTemplate.from_messages([
+    ("system", SYSTEM_PROMPT),
+    ("human", HYBRID_HUMAN_TEMPLATE),
+])
+DOC_ONLY_PROMPT = ChatPromptTemplate.from_messages([
+    ("system", SYSTEM_PROMPT),
+    ("human", DOC_ONLY_HUMAN_TEMPLATE),
+])
 
 logger = logging.getLogger(__name__)
 

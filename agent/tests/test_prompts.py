@@ -1,6 +1,6 @@
 """Tests for prompt formatting."""
 import pytest
-from app.prompts import (
+from app.rag.prompts import (
     format_chunk,
     format_retrieved_chunks,
     build_user_prompt,

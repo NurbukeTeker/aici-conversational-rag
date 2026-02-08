@@ -19,3 +19,6 @@ class GraphState(TypedDict, total=False):
     retrieved_docs: list[dict]
     answer_text: str
     guard_result: dict | None
+    # Injected at runtime by graph_builder; used by retrieve_node (_settings), validate/summarize/finalize (_reasoning_service)
+    _settings: Any
+    _reasoning_service: Any

@@ -29,8 +29,8 @@ class TestAcceptanceJsonOnly:
 
     def test_how_many_layers_json_only_no_retrieval(self, client):
         """Q: How many drawing layers present? -> JSON_ONLY, no retrieval."""
-        with patch("app.retrieval_lc.retrieve", MagicMock(return_value=[])) as mock_retrieve:
-            with patch("app.lc.chains.invoke_hybrid", MagicMock(return_value="There are 5 layers.")):
+        with patch("app.rag.retrieval.retrieve", MagicMock(return_value=[])) as mock_retrieve:
+            with patch("app.rag.chains.invoke_hybrid", MagicMock(return_value="There are 5 layers.")):
                 session_objects = [
                     {"layer": "Highway", "type": "line"},
                     {"layer": "Plot Boundary", "type": "polygon"},
@@ -67,8 +67,8 @@ class TestAcceptanceDocOnly:
             "text": "Highway – is a public right of way.",
             "distance": 0.1,
         }
-        with patch("app.retrieval_lc.retrieve", MagicMock(return_value=[highway_chunk])) as mock_retrieve:
-            with patch("app.lc.chains.invoke_doc_only", MagicMock(return_value="A highway is a public right of way.")):
+        with patch("app.rag.retrieval.retrieve", MagicMock(return_value=[highway_chunk])) as mock_retrieve:
+            with patch("app.rag.chains.invoke_doc_only", MagicMock(return_value="A highway is a public right of way.")):
                 resp = client.post(
                     "/answer",
                     json={"question": "What is the definition of a highway?", "session_objects": []},
@@ -80,7 +80,7 @@ class TestAcceptanceDocOnly:
 
     def test_definition_no_chunks_override_message(self, client):
         """When no chunks retrieved: answer says no definition found."""
-        with patch("app.retrieval_lc.retrieve", MagicMock(return_value=[])):
+        with patch("app.rag.retrieval.retrieve", MagicMock(return_value=[])):
             resp = client.post(
                 "/answer",
                 json={"question": "What is the definition of a highway?", "session_objects": []},
@@ -104,7 +104,7 @@ class TestAcceptanceHybridMissingGeometry:
 
     def test_front_highway_missing_geometry_guard(self, client):
         """Q: Does this property front a highway? (missing geometry) -> guard message."""
-        with patch("app.retrieval_lc.retrieve", MagicMock(return_value=[])):
+        with patch("app.rag.retrieval.retrieve", MagicMock(return_value=[])):
             session_objects = [
                 {"layer": "Highway", "geometry": None, "type": "line"},
                 {"layer": "Plot Boundary", "geometry": None, "type": "polygon"},

@@ -20,16 +20,8 @@ _NEEDS_INPUT_PHRASES_EN = (
     r"what'?s\s+missing\s+to\s+answer",
 )
 
-# Turkish phrases
-_NEEDS_INPUT_PHRASES_TR = (
-    r"ne\s+laz[ıi]m",
-    r"ne\s+gerekiyor",
-    r"ne\s+eksik",
-    r"neye\s+ihtiya[çc]",
-)
-
 _NEEDS_INPUT_PATTERNS = [
-    re.compile(p, re.IGNORECASE) for p in (*_NEEDS_INPUT_PHRASES_EN, *_NEEDS_INPUT_PHRASES_TR)
+    re.compile(p, re.IGNORECASE) for p in _NEEDS_INPUT_PHRASES_EN
 ]
 
 
@@ -37,9 +29,8 @@ def is_needs_input_followup(question: str) -> bool:
     """
     Return True if the question is a follow-up asking what input/geometry is needed.
 
-    Matches phrases like:
-    - English: "what it needs", "what do you need", "what is needed", "what's missing", "what do i need"
-    - Turkish: "ne lazım", "ne gerekiyor", "ne eksik", "neye ihtiyaç"
+    Matches phrases like: "what it needs", "what do you need", "what is needed",
+    "what's missing", "what do i need".
     """
     if not question or not isinstance(question, str):
         return False
@@ -64,7 +55,7 @@ def get_missing_geometry_layers(session_objects: list[dict]) -> list[str]:
     Prefer: Highway and Plot Boundary if they exist and lack geometry.
     If all geometries are null, include all layers present (or at least Highway + Plot Boundary if present).
     """
-    from .geometry_guard import missing_geometry_layers, has_geometry
+    from .guards.geometry_guard import missing_geometry_layers, has_geometry
 
     if not session_objects:
         return []

@@ -139,7 +139,7 @@ Folder-level, file-by-file documentation for `frontend/src/`. All claims are der
 **Purpose:** Main authenticated UI: JSON editor for drawing objects, Q&A panel with streaming, export buttons.
 
 **Key symbols:**
-- `getWsQaUrl()` — Builds WebSocket URL with token: `ws(s)://host/api/ws/qa?token=...`.
+- `getWsQaUrl()` — Builds WebSocket URL (no token in URL): `ws(s)://host/api/ws/qa`; auth sent as first message `{type:'auth',token:...}`.
 - `parseAnswerNarrative(text)` — Strips evidence markers and trailing Evidence block from answer text.
 - `SAMPLE_OBJECTS` — Default JSON for editor.
 - `Dashboard` — JSON textarea, Update Session button, Q&A messages, Ask input, export Excel/JSON buttons, theme toggle, logout.

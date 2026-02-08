@@ -94,7 +94,7 @@ The **AICI Hybrid RAG** system answers planning-regulation questions by combinin
 |------|-----------|--------|-----------|
 | 1 | Frontend | `POST /api/qa` with `{question}` | `frontend/src/services/api.js:qaApi.ask()` |
 | 2 | Backend | Load session from Redis, POST to Agent | `backend/app/main.py:ask_question()` → `session_service.get_objects()` → `httpx.post(agent/answer)` |
-| 3 | Agent | Run LangGraph workflow | `agent/app/main.py:_run_answer_graph()` → `answer_graph.invoke()` |
+| 3 | Agent | Run LangGraph workflow | `agent/app/main.py:answer_question()` → `rag.orchestrator.run_answer()` → `answer_graph.invoke()` |
 | 4 | Agent | Validate → smalltalk → geometry_guard → followup → summarize → route → retrieve → llm → finalize | `agent/app/graph_lc/graph_builder.py`, `agent/app/graph_lc/nodes.py` |
 | 5 | Backend | Return `QAResponse(**agent_response)` | `backend/app/main.py:529` |
 
@@ -105,11 +105,11 @@ The **AICI Hybrid RAG** system answers planning-regulation questions by combinin
 
 | Step | Component | Action | Code Path |
 |------|-----------|--------|-----------|
-| 1 | Frontend | Connect `ws://host/api/ws/qa?token=<jwt>` | `frontend/src/pages/Dashboard.jsx:getWsQaUrl()` |
-| 2 | Backend | Decode JWT, accept WS, forward to Agent stream | `backend/app/main.py:websocket_qa()` |
+| 1 | Frontend | Connect `ws://host/api/ws/qa`, then send `{type:"auth",token:"<jwt>"}` as first message | `frontend/src/pages/Dashboard.jsx:getWsQaUrl()` + onopen |
+| 2 | Backend | Accept WS, require first message auth; decode JWT, then forward to Agent stream | `backend/app/main.py:websocket_qa()` |
 | 3 | Backend | `httpx.stream(POST agent/answer/stream)` | `backend/app/main.py:447-458` |
 | 4 | Backend | For each NDJSON line from Agent, `websocket.send_json(obj)` | `backend/app/main.py:459-466` |
-| 5 | Agent | `run_graph_until_route()` + `astream_doc_only` / `astream_hybrid` | `agent/app/main.py:_stream_answer_ndjson()` |
+| 5 | Agent | `run_graph_until_route()` + `astream_doc_only` / `astream_hybrid` | `agent/app/rag/orchestrator.py:stream_answer_ndjson()` (called from main.py) |
 | 6 | Frontend | Append `data.c` for `t:chunk`; finalize on `t:done` | `frontend/src/pages/Dashboard.jsx:257-305` |
 
 **NDJSON format:** `{"t":"chunk","c":"..."}` then `{"t":"done","answer":"...","query_mode":"...","session_summary":{...}}`.
@@ -121,7 +121,7 @@ The **AICI Hybrid RAG** system answers planning-regulation questions by combinin
 | 1 | Agent startup | `sync_service.sync(delete_missing=False)` | `agent/app/main.py:78-93` |
 | 2 | `POST /ingest` | `sync_service.sync()` or `force_reingest()` | `agent/app/main.py:161-191` |
 | 3 | Sync | For each PDF: hash → status (NEW/UNCHANGED/UPDATED) | `agent/app/sync_service.py:_process_document()` |
-| 4 | Ingestion | `pypdf` extract → `RecursiveCharacterTextSplitter` (1000/200) | `agent/app/ingestion.py` |
+| 4 | Ingestion | `pypdf` extract → `RecursiveCharacterTextSplitter` (1000/200) | `agent/app/ingest/ingestion.py` |
 | 5 | Storage | Chunks + metadata → ChromaDB via `VectorStoreService` | `agent/app/vector_store.py:add_documents()` |
 | 6 | Registry | `DocumentRegistry.register(source_id, hash, chunk_ids)` | `agent/app/document_registry.py` |
 
@@ -157,7 +157,7 @@ The **AICI Hybrid RAG** system answers planning-regulation questions by combinin
 | `/auth/check-password` | No | POST | Password strength |
 | `/session/objects` | Bearer | PUT, GET | Update/get session JSON |
 | `/qa` | Bearer | POST | Ask question (REST) |
-| `/ws/qa` | Query token | WS | Streaming Q&A |
+| `/ws/qa` | First-message auth | WS | Streaming Q&A |
 | `/health` | No | GET | Redis + agent status |
 | `/export/excel` | Bearer | POST | Download Excel |
 | `/export/json` | Bearer | POST | Download JSON |
@@ -184,34 +184,37 @@ The **AICI Hybrid RAG** system answers planning-regulation questions by combinin
 
 ## 5. Agent Deep Dive (FastAPI + LangChain/LangGraph)
 
+For file-by-file agent documentation, see [docs/AGENT_CODE_GUIDE.md](AGENT_CODE_GUIDE.md).
+
 ### 5.1 Folder Map: `agent/app/`
 
-| File | Responsibility |
+| Path | Responsibility |
 |------|----------------|
-| `main.py` | FastAPI app, `/answer`, `/answer/stream`, `/ingest`, `/health`, `/sync/status` |
+| `main.py` | FastAPI app (thin controllers): `/answer`, `/answer/stream`, `/ingest`, `/health`, `/sync/status`. Delegates to `rag.orchestrator`. |
 | `graph_lc/graph_builder.py` | LangGraph StateGraph construction |
 | `graph_lc/nodes.py` | Node implementations (validate, smalltalk, geometry_guard, followup, summarize, route, retrieve, llm, finalize) |
 | `graph_lc/state.py` | GraphState TypedDict |
+| `rag/orchestrator.py` | `run_answer()`, `stream_answer_ndjson()` — answer flow orchestration |
+| `rag/prompts.py` | Prompt strings; format_chunk, build_user_prompt helpers |
+| `rag/chains.py` | LCEL chains (doc_only, hybrid), invoke/astream; ChatPromptTemplate from prompts |
+| `rag/retrieval.py` | LangChain Chroma retrieve(); uses retrieval_postprocess.postprocess |
+| `rag/retrieval_postprocess.py` | postprocess(chunks) — distance filter, max per (source, page) |
+| `ingest/ingestion.py` | PDF extraction, RecursiveCharacterTextSplitter |
+| `guards/doc_only_guard.py` | Definition-term-in-chunks check |
+| `guards/geometry_guard.py` | Missing-geometry detection |
 | `routing.py` | DOC_ONLY / JSON_ONLY / HYBRID (keyword-based) |
-| `retrieval_lc.py` | LangChain Chroma retriever, postprocess |
-| `retrieval.py` | `postprocess_retrieved_chunks` (distance, max per page) |
-| `lc/chains.py` | LCEL chains (doc_only, hybrid), invoke/astream |
-| `lc/prompts.py` | ChatPromptTemplate (SYSTEM_PROMPT, HYBRID_PROMPT, DOC_ONLY_PROMPT) |
-| `ingestion.py` | PDF extraction, RecursiveCharacterTextSplitter |
-| `vector_store.py` | ChromaDB add/search/delete |
+| `vector_store.py` | ChromaDB add/search/delete (sync path) |
 | `chroma_client.py` | Shared PersistentClient |
 | `document_registry.py` | SHA256 hashing, DocumentRecord |
 | `sync_service.py` | Incremental sync (NEW/UNCHANGED/UPDATED/DELETED) |
 | `reasoning.py` | Session summary, validate JSON, extract layers |
 | `smalltalk.py` | Greeting detection |
-| `geometry_guard.py` | Missing-geometry detection |
-| `doc_only_guard.py` | Definition-term-in-chunks check |
 | `followups.py` | "What's needed?" checklist |
 
 ### 5.2 `/answer` and `/answer/stream` Call Graph
 
-- **Sync:** `agent/app/main.py:answer_question()` → `_run_answer_graph()` → `answer_graph.invoke(initial_state)`.
-- **Stream:** `_stream_answer_ndjson()` → `run_graph_until_route()` (from `graph_lc/graph_builder.py`) → then `astream_doc_only` or `astream_hybrid` from `lc/chains.py` → `finalize_node` → NDJSON yield.
+- **Sync:** `agent/app/main.py:answer_question()` → `rag.orchestrator.run_answer(request, answer_graph)` → `answer_graph.invoke(initial_state)`.
+- **Stream:** `main.py` → `rag.orchestrator.stream_answer_ndjson()` → `run_graph_until_route()` (from `graph_lc/graph_builder.py`) → then `astream_doc_only` or `astream_hybrid` from `rag/chains.py` → `finalize_node` → NDJSON yield.
 
 ### 5.3 Routing Logic (DOC_ONLY / JSON_ONLY / HYBRID)
 
@@ -227,11 +230,11 @@ Decided in `route_node` → `routing.get_query_mode(question)`.
 
 - **Chroma:** Shared client from `chroma_client.get_chroma_client()`, collection `planning_documents`.
 - **Config:** `retrieval_top_k` (5), `retrieval_max_distance` (optional).
-- **Postprocess:** `retrieval.postprocess_retrieved_chunks()` — filter by distance, max 2 chunks per (source, page), sort by distance.
+- **Postprocess:** `rag/retrieval_postprocess.py:postprocess()` — filter by distance, max 2 chunks per (source, page), sort by distance.
 
 ### 5.5 Prompting
 
-- **System prompt:** `lc/prompts.py:SYSTEM_PROMPT` — docs authoritative, JSON ground truth, no hallucination, cite short phrases.
+- **System prompt:** `rag/prompts.py:SYSTEM_PROMPT` — docs authoritative, JSON ground truth, no hallucination, cite short phrases.
 - **Doc-only:** Question + retrieved chunks.
 - **Hybrid:** Question + JSON pretty + session summary (layer_counts, plot_boundary_present, highways_present, limitations) + retrieved chunks.
 - **Session summary:** Computed in `summarize_node` via `reasoning_service.compute_session_summary()`.
@@ -246,7 +249,7 @@ The agent **does not** return structured evidence. `AnswerResponse` has `answer`
 |-------|----------|-----------|--------|
 | Smalltalk | `nodes.smalltalk_node` | `smalltalk.is_smalltalk(question)` | `guard_result: {type: "smalltalk"}` → `finalize_node` uses `smalltalk.get_smalltalk_response()` |
 | Missing geometry | `nodes.geometry_guard_node` | Spatial question about this drawing + required layers lack geometry | Deterministic message with missing layers |
-| Doc-only absence | `doc_only_guard.should_use_retrieved_for_doc_only()` | Definition term not in chunks | `DOC_ONLY_EMPTY_MESSAGE` |
+| Doc-only absence | `guards/doc_only_guard.py:should_use_retrieved_for_doc_only()` | Definition term not in chunks | `DOC_ONLY_EMPTY_MESSAGE` |
 | Needs-input followup | `nodes.followup_node` | "What's needed?" + missing layers | Checklist message |
 
 ### 5.8 LangGraph State and Flow
@@ -280,7 +283,7 @@ The agent **does not** return structured evidence. `AnswerResponse` has `answer`
 
 ### 6.3 Streaming UI
 
-- WebSocket: `ws://host/api/ws/qa?token=...`. On `t:chunk`, append `data.c` to `streamingAnswer`.
+- WebSocket: `ws://host/api/ws/qa`; first message `{type:"auth",token:"..."}`. On `t:chunk`, append `data.c` to `streamingAnswer`.
 - Human-speed reveal: ~35 chars/sec via `setInterval` and `streamingDisplayLength` — `Dashboard.jsx:147-184`.
 - Finalize on `t:done`; REST fallback streams full answer then shows it.
 

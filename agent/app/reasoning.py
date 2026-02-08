@@ -10,14 +10,7 @@ logger = logging.getLogger(__name__)
 
 class ReasoningService:
     """Service for computing session summaries and reasoning."""
-    
-    # Known layer types from the drawing specification
-    KNOWN_LAYERS = {
-        "Highway", "Plot Boundary", "Walls", "Doors", "Windows",
-        "Roof", "Extension", "Garage", "Garden", "Fence",
-        "Driveway", "Patio", "Conservatory"
-    }
-    
+
     def compute_session_summary(self, session_objects: list[dict[str, Any]]) -> SessionSummary:
         """Compute a summary of session objects for reasoning."""
         if not session_objects:
@@ -122,49 +115,7 @@ class ReasoningService:
             limitations.append("No coordinate/geometry data found")
         
         return limitations
-    
-    def extract_layers_used(
-        self,
-        session_objects: list[dict[str, Any]],
-        question: str
-    ) -> tuple[list[str], list[int]]:
-        """Extract which layers are relevant to the question."""
-        question_lower = question.lower()
-        
-        layers_used = []
-        indices_used = []
-        
-        # Keywords to layer mapping
-        keyword_layer_map = {
-            "highway": ["highway", "road"],
-            "boundary": ["plot boundary", "boundary", "plot"],
-            "wall": ["walls", "wall"],
-            "door": ["doors", "door"],
-            "window": ["windows", "window"],
-            "extension": ["extension"],
-            "roof": ["roof"],
-        }
-        
-        # Find relevant keywords in question
-        relevant_layer_keywords = set()
-        for keyword, layer_matches in keyword_layer_map.items():
-            if keyword in question_lower:
-                relevant_layer_keywords.update(layer_matches)
-        
-        # If no specific keywords, include all layers
-        if not relevant_layer_keywords:
-            relevant_layer_keywords = None
-        
-        # Find matching objects
-        for idx, obj in enumerate(session_objects):
-            layer = obj.get("layer", obj.get("Layer", "")).lower()
-            
-            if relevant_layer_keywords is None or any(kw in layer for kw in relevant_layer_keywords):
-                layers_used.append(obj.get("layer", obj.get("Layer", "Unknown")))
-                indices_used.append(idx)
-        
-        return layers_used, indices_used
-    
+
     def validate_json_schema(self, session_objects: list[dict[str, Any]]) -> list[str]:
         """Validate session JSON and return warnings."""
         warnings = []

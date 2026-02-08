@@ -1,6 +1,8 @@
 """Backend service configuration."""
-from pydantic_settings import BaseSettings
 from functools import lru_cache
+
+from pydantic import ConfigDict
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
@@ -36,10 +38,8 @@ class Settings(BaseSettings):
     # Username Policy
     username_min_length: int = 3
     username_max_length: int = 30
-    
-    class Config:
-        env_file = ".env"
-        extra = "ignore"
+
+    model_config = ConfigDict(env_file=".env", extra="ignore")
 
 
 @lru_cache()

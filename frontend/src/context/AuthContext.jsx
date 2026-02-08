@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect } from 'react';
+import { authApi } from '../services/api';
 
 const AuthContext = createContext(null);
 
@@ -8,22 +9,25 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Check for existing token on mount
-    try {
-      const storedToken = localStorage.getItem('token');
-      const storedUser = localStorage.getItem('user');
-      
-      if (storedToken && storedUser) {
-        setToken(storedToken);
-        setUser(JSON.parse(storedUser));
-      }
-    } catch (error) {
-      // Clear corrupted data
-      console.error('Error loading auth data:', error);
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
+    const storedToken = localStorage.getItem('token');
+    if (!storedToken) {
+      setLoading(false);
+      return;
     }
-    setLoading(false);
+    // Validate token with backend before showing dashboard (avoids showing dashboard then redirecting when token is expired)
+    authApi
+      .me()
+      .then((me) => {
+        setToken(storedToken);
+        setUser({ username: me.username, email: me.email, user_id: me.user_id });
+      })
+      .catch(() => {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+      })
+      .finally(() => {
+        setLoading(false);
+      });
   }, []);
 
   const login = (tokenData, userData) => {

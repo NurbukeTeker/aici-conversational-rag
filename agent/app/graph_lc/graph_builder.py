@@ -26,40 +26,40 @@ def build_answer_graph(
         return state
 
     def validate(s: GraphState):
-        _inject(dict(s))
-        return nodes.validate_node(s)
+        s2 = _inject(dict(s))
+        return nodes.validate_node(s2)
 
     def smalltalk(s: GraphState):
-        _inject(dict(s))
-        return nodes.smalltalk_node(s)
+        s2 = _inject(dict(s))
+        return nodes.smalltalk_node(s2)
 
     def geometry_guard(s: GraphState):
-        _inject(dict(s))
-        return nodes.geometry_guard_node(s)
+        s2 = _inject(dict(s))
+        return nodes.geometry_guard_node(s2)
 
     def followup(s: GraphState):
-        _inject(dict(s))
-        return nodes.followup_node(s)
+        s2 = _inject(dict(s))
+        return nodes.followup_node(s2)
 
     def summarize(s: GraphState):
-        _inject(dict(s))
-        return nodes.summarize_node(s)
+        s2 = _inject(dict(s))
+        return nodes.summarize_node(s2)
 
     def retrieve(s: GraphState):
-        _inject(dict(s))
-        return nodes.retrieve_node(s)
+        s2 = _inject(dict(s))
+        return nodes.retrieve_node(s2)
 
     def route(s: GraphState):
-        _inject(dict(s))
-        return nodes.route_node(s)
+        s2 = _inject(dict(s))
+        return nodes.route_node(s2)
 
     def llm(s: GraphState):
-        _inject(dict(s))
-        return nodes.llm_node(s)
+        s2 = _inject(dict(s))
+        return nodes.llm_node(s2)
 
     def finalize(s: GraphState):
-        _inject(dict(s))
-        return nodes.finalize_node(s)
+        s2 = _inject(dict(s))
+        return nodes.finalize_node(s2)
 
     workflow = StateGraph(GraphState)
     workflow.add_node("validate", validate)
@@ -84,9 +84,10 @@ def build_answer_graph(
     workflow.add_edge("geometry_guard", "followup")
 
     def after_followup(s: GraphState):
-        if s.get("guard_result") and s["guard_result"].get("type") == "missing_geometry":
+        gr = s.get("guard_result")
+        if isinstance(gr, dict) and gr.get("type") == "missing_geometry":
             return "finalize"
-        if s.get("guard_result") and s["guard_result"].get("type") == "needs_input":
+        if isinstance(gr, dict) and gr.get("type") == "needs_input":
             return "finalize"
         return "summarize"
 
@@ -106,7 +107,7 @@ def run_graph_until_route(
     settings: "Settings",
 ) -> dict[str, Any]:
     """
-    Run graph nodes validate -> smalltalk -> geometry_guard -> followup -> summarize -> retrieve -> route.
+    Run graph nodes validate -> smalltalk -> geometry_guard -> followup -> summarize -> route -> retrieve.
     Returns state dict. Used by /answer/stream so streaming uses the same node logic (single source of truth).
     """
     state: dict[str, Any] = {

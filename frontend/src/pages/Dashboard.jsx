@@ -3,13 +3,13 @@ import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { sessionApi, qaApi, exportApi, ApiError } from '../services/api';
 
-// WebSocket URL for real-time streaming Q&A (proxied in dev to backend)
+// WebSocket URL for real-time streaming Q&A (no token in URL — sent in first message to avoid logs)
 function getWsQaUrl() {
   const token = localStorage.getItem('token');
   if (!token) return null;
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const host = window.location.host;
-  return `${protocol}//${host}/api/ws/qa?token=${encodeURIComponent(token)}`;
+  return `${protocol}//${host}/api/ws/qa`;
 }
 
 
@@ -41,6 +41,36 @@ function parseAnswerNarrative(text) {
   return text.trim();
 }
 
+const ALLOWED_OBJECT_KEYS = new Set(['type', 'layer', 'geometry', 'properties']);
+
+/** Validate drawing objects: required keys (type, layer), no extra keys. */
+function validateSessionSchema(objects) {
+  if (!Array.isArray(objects)) return { valid: false, message: 'Session must be a JSON array.' };
+  for (let i = 0; i < objects.length; i++) {
+    const obj = objects[i];
+    if (obj === null || typeof obj !== 'object') {
+      return { valid: false, message: `Object at index ${i} must be an object.` };
+    }
+    const keys = Object.keys(obj);
+    const invalidKeys = keys.filter((k) => !ALLOWED_OBJECT_KEYS.has(k));
+    if (invalidKeys.length) {
+      return {
+        valid: false,
+        message: `Object at index ${i}: invalid key(s) ${invalidKeys.map((k) => `"${k}"`).join(', ')}. Allowed keys only: type, layer, geometry, properties.`,
+      };
+    }
+    const typeVal = obj.type;
+    if (typeVal == null || String(typeVal).trim() === '') {
+      return { valid: false, message: `Object at index ${i} is missing or empty "type". Each drawing object must have "type".` };
+    }
+    const layerVal = obj.layer;
+    if (layerVal == null || String(layerVal).trim() === '') {
+      return { valid: false, message: `Object at index ${i} is missing or empty "layer". Each drawing object must have "layer".` };
+    }
+  }
+  return { valid: true };
+}
+
 // Sample drawing objects from the specification
 const SAMPLE_OBJECTS = [
   { "layer": "Highway", "type": "line", "properties": { "name": "Main Road", "width": 6 } },
@@ -58,6 +88,7 @@ function Dashboard() {
   const [jsonText, setJsonText] = useState(JSON.stringify(SAMPLE_OBJECTS, null, 2));
   const [jsonValid, setJsonValid] = useState(true);
   const [jsonError, setJsonError] = useState('');
+  const [schemaError, setSchemaError] = useState(null); // e.g. missing "layer" in an object
   const [sessionSaved, setSessionSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   
@@ -89,13 +120,20 @@ function Dashboard() {
     loadSessionObjects();
   }, []);
 
-  // WebSocket for real-time streaming: connect on mount when token exists
+  // WebSocket for real-time streaming: connect on mount when token exists; auth via first message (token not in URL)
   useEffect(() => {
     const url = getWsQaUrl();
-    if (!url) return;
+    const token = localStorage.getItem('token');
+    if (!url || !token) return;
     const ws = new WebSocket(url);
-    ws.onopen = () => setWsReady(true);
-    ws.onclose = () => setWsReady(false);
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ type: 'auth', token }));
+      setWsReady(true);
+    };
+    ws.onclose = (event) => {
+      setWsReady(false);
+      if (event.code === 4001) logout(); // auth failed, redirect to login
+    };
     ws.onerror = () => setWsReady(false);
     wsRef.current = ws;
     return () => {
@@ -103,7 +141,7 @@ function Dashboard() {
       wsRef.current = null;
       setWsReady(false);
     };
-  }, []);
+  }, [logout]);
 
   // Auto-scroll to bottom when new content appears, only if user is already near bottom
   const handleQaMessagesScroll = () => {
@@ -188,7 +226,10 @@ function Dashboard() {
     try {
       const response = await sessionApi.getObjects();
       if (response.objects && response.objects.length > 0) {
-        setJsonText(JSON.stringify(response.objects, null, 2));
+        const objects = response.objects;
+        setJsonText(JSON.stringify(objects, null, 2));
+        const schema = validateSessionSchema(objects);
+        setSchemaError(schema.valid ? null : schema.message);
         setSessionSaved(true);
       }
     } catch (err) {
@@ -201,23 +242,31 @@ function Dashboard() {
     const text = e.target.value;
     setJsonText(text);
     setSessionSaved(false);
-    
+
     try {
-      JSON.parse(text);
+      const parsed = JSON.parse(text);
       setJsonValid(true);
       setJsonError('');
+      const schema = validateSessionSchema(Array.isArray(parsed) ? parsed : []);
+      setSchemaError(schema.valid ? null : schema.message);
     } catch (err) {
       setJsonValid(false);
       setJsonError(err.message);
+      setSchemaError(null);
     }
   };
 
   const handleSaveSession = async () => {
     if (!jsonValid) return;
-    
+    const objects = JSON.parse(jsonText);
+    const schema = validateSessionSchema(Array.isArray(objects) ? objects : []);
+    if (!schema.valid) {
+      setSchemaError(schema.message);
+      return;
+    }
+    setSchemaError(null);
     setSaving(true);
     try {
-      const objects = JSON.parse(jsonText);
       await sessionApi.updateObjects(objects);
       setSessionSaved(true);
     } catch (err) {
@@ -512,13 +561,17 @@ function Dashboard() {
           
           <div className="panel-footer">
             <div className="flex justify-between items-center">
-              <div className={`json-status ${jsonValid ? 'valid' : 'invalid'}`}>
-                {jsonValid ? 'Valid JSON' : `Invalid: ${jsonError}`}
+              <div className={`json-status ${jsonValid && !schemaError ? 'valid' : 'invalid'}`}>
+                {!jsonValid
+                  ? `Invalid JSON: ${jsonError}`
+                  : schemaError
+                    ? schemaError + ' Update session not applied.'
+                    : 'Valid JSON'}
               </div>
               <button
                 className="btn-primary"
                 onClick={handleSaveSession}
-                disabled={!jsonValid || saving}
+                disabled={!jsonValid || !!schemaError || saving}
               >
                 {saving ? 'Saving...' : sessionSaved ? 'Saved' : 'Update Session'}
               </button>

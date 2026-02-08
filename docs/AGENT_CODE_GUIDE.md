@@ -2,6 +2,8 @@
 
 Folder-level, file-by-file documentation for `agent/app/`. All claims are derived from actual code.
 
+**Current layout (post-refactor):** Single source of truth for the agent. **API** in `main.py` (thin controllers). **Orchestration** in `rag/orchestrator.py`. **Graph** in `graph_lc/` (LangGraph StateGraph). **RAG** in `rag/` (prompts, LCEL chains, retrieval, retrieval_postprocess). **Guards** in `guards/` (doc_only_guard, geometry_guard). **Ingestion** in `ingest/` (ingestion.py). Shared modules at app root: config, models, chroma_client, vector_store, document_registry, sync_service, reasoning, routing, smalltalk, followups.
+
 ---
 
 ## agent/app/__init__.py
@@ -26,7 +28,7 @@ Folder-level, file-by-file documentation for `agent/app/`. All claims are derive
 - Inputs: Environment variables, `.env` file.
 - Outputs: `Settings` instance with defaults (e.g. `retrieval_top_k=5`, `chunk_size=1000`, `chunk_overlap=200`).
 
-**Callers:** chroma_client, ingestion, retrieval_lc, sync_service, vector_store, main, graph_lc (via injection).
+**Callers:** chroma_client, ingest.ingestion, rag.retrieval, sync_service, vector_store, main, graph_lc (via injection).
 
 **Edge cases / errors:** `extra="ignore"`. `retrieval_max_distance` default None (no distance filter).
 
@@ -43,7 +45,7 @@ Folder-level, file-by-file documentation for `agent/app/`. All claims are derive
 - Inputs: `CHROMA_PERSIST_DIRECTORY` from config.
 - Outputs: `chromadb.PersistentClient` instance.
 
-**Callers:** `vector_store.py`, `retrieval_lc.py`.
+**Callers:** `vector_store.py`, `rag/retrieval.py`.
 
 **Edge cases / errors:** Directory created with `mkdir(parents=True, exist_ok=True)`.
 
@@ -68,11 +70,11 @@ Folder-level, file-by-file documentation for `agent/app/`. All claims are derive
 
 **Edge cases / errors:** Empty chunks return 0 added. Empty collection search returns []. Exceptions logged; delete_by_ids/delete_by_source return 0 on error.
 
-**Potential refactors:** `retrieval_lc.py` uses LangChain Chroma directly; VectorStoreService used only by sync. Consider consolidating retrieval paths.
+**Note:** Sync uses VectorStoreService; Q&A retrieval uses `rag/retrieval.py` (LangChain Chroma). Both use the same chroma_client.
 
 ---
 
-## agent/app/ingestion.py
+## agent/app/ingest/ingestion.py
 
 **Purpose:** PDF text extraction (pypdf), chunking (RecursiveCharacterTextSplitter), and metadata attachment. Produces chunks for vector store.
 
@@ -85,11 +87,10 @@ Folder-level, file-by-file documentation for `agent/app/`. All claims are derive
 - `chunk_pages`: pages list; yields `{id, text, metadata}` with source, page, chunk_index, chunk_id, section (if detected).
 - `detect_section`: Looks for patterns like "Class A", "General Issues", etc. in first 200 chars.
 
-**Callers:** `sync_service.py`.
+**Callers:** `sync_service.py` (imports `PDFIngestionService` from `ingest.ingestion`). Package `ingest/__init__.py` re-exports `PDFIngestionService`.
+
 
 **Edge cases / errors:** Non-existent PDF directory returns []. Extract exceptions logged; returns []. Section detection returns None if no match.
-
-**Potential refactors:** Section patterns hardcoded; consider configurable. Chunk ID format: `{source}_{page:03d}_{counter:04d}`.
 
 ---
 
@@ -130,7 +131,7 @@ Folder-level, file-by-file documentation for `agent/app/`. All claims are derive
 - `sync(delete_missing=False)`: Processes all PDFs; optional deletion of registry entries for missing files.
 - `force_reingest(source_id)`: Unregisters specific or all docs; re-ingests.
 
-**Callers:** `main.py` (startup sync, /ingest endpoint).
+**Callers:** `main.py` (startup sync, /ingest endpoint). Imports `PDFIngestionService` from `ingest.ingestion`.
 
 **Edge cases / errors:** Per-document errors appended to SyncResult.errors; processing continues. Empty chunks logged and skipped.
 
@@ -138,12 +139,12 @@ Folder-level, file-by-file documentation for `agent/app/`. All claims are derive
 
 ---
 
-## agent/app/retrieval.py
+## agent/app/rag/retrieval_postprocess.py
 
-**Purpose:** Postprocesses retrieved chunks: filter by max_distance, limit per (source, page), sort by distance. Chroma uses L2 (lower = better).
+**Purpose:** Pure Python postprocessing of retrieved chunks (no LangChain). Filter by max_distance, limit per (source, page), sort by distance. Used by retrieval and by tests without pulling in LangChain.
 
 **Key functions:**
-- `postprocess_retrieved_chunks(chunks, max_distance, max_per_page)` — Filters by distance threshold; keeps up to 2 chunks per (source, page); sorts by distance ascending.
+- `postprocess(chunks, max_distance, max_per_page)` — Filters by distance threshold; keeps up to 2 chunks per (source, page); sorts by distance ascending.
 
 **Constants:** `MAX_CHUNKS_PER_PAGE=2`, `_DISTANCE_NONE=inf` for missing distance.
 
@@ -151,19 +152,18 @@ Folder-level, file-by-file documentation for `agent/app/`. All claims are derive
 - Input: list of chunk dicts with `distance`, `source`, `page`.
 - Output: filtered, deduplicated, sorted list.
 
-**Callers:** `retrieval_lc.py`.
+**Callers:** `rag/retrieval.py`, `agent/tests/test_retrieval.py`.
 
 **Edge cases / errors:** None/invalid distance treated as inf (sorted last).
 
 ---
 
-## agent/app/retrieval_lc.py
+## agent/app/rag/retrieval.py
 
-**Purpose:** LangChain Chroma retriever. similarity_search_with_score, then postprocess. Same collection as ingestion.
+**Purpose:** LangChain Chroma retrieval. similarity_search_with_score, then postprocess (from retrieval_postprocess). Same collection as ingestion.
 
 **Key functions:**
 - `get_vectorstore()` — LangChain Chroma with shared client, collection from config.
-- `get_retriever(top_k)` — Retriever with search_kwargs k.
 - `retrieve(query, top_k, max_distance)` — similarity_search_with_score → postprocess; returns list of chunk dicts.
 
 **Inputs/outputs:**
@@ -173,29 +173,23 @@ Folder-level, file-by-file documentation for `agent/app/`. All claims are derive
 
 **Edge cases / errors:** Chroma returns L2 distance; lower = better. Postprocess filters by max_distance and limits per page.
 
-**Potential refactors:** Global `_vectorstore`, `_retriever`; retrieval_lc uses vectorstore, sync uses VectorStoreService; both use same client.
-
 ---
 
 ## agent/app/reasoning.py
 
-**Purpose:** Session summary computation, JSON schema validation, layer extraction for evidence. No LLM calls.
+**Purpose:** Session summary computation and JSON schema validation. No LLM calls.
 
 **Key classes/functions:**
-- `ReasoningService` — `compute_session_summary`, `_detect_limitations`, `_object_has_geometry`, `extract_layers_used`, `validate_json_schema`.
-- `KNOWN_LAYERS` — Set of layer names (Highway, Plot Boundary, Walls, etc.).
+- `ReasoningService` — `compute_session_summary`, `_detect_limitations`, `_object_has_geometry`, `validate_json_schema`.
 
 **Inputs/outputs:**
 - `compute_session_summary(session_objects)`: outputs `SessionSummary` (layer_counts, plot_boundary_present, highways_present, total_objects, limitations).
 - `_object_has_geometry(obj)`: checks `geometry.coordinates` or top-level `coordinates`.
-- `extract_layers_used(session_objects, question)`: returns (layers_used, indices_used) based on keyword matching.
-- `validate_json_schema`: returns list of warning strings.
+- `validate_json_schema(session_objects)`: returns list of warning strings.
 
 **Callers:** `graph_lc/nodes.py` (validate_node, summarize_node, finalize_node).
 
 **Edge cases / errors:** Empty session returns SessionSummary with limitations. Handles both "layer" and "Layer" keys.
-
-**Potential refactors:** `extract_layers_used` used for evidence extraction; agent does not currently return evidence. Keyword mapping hardcoded.
 
 ---
 
@@ -238,7 +232,7 @@ Folder-level, file-by-file documentation for `agent/app/`. All claims are derive
 
 ---
 
-## agent/app/geometry_guard.py
+## agent/app/guards/geometry_guard.py
 
 **Purpose:** Deterministic guard for spatial questions when required layers exist but all objects lack geometry. Prevents LLM hallucination.
 
@@ -252,25 +246,25 @@ Folder-level, file-by-file documentation for `agent/app/`. All claims are derive
 - Input: question, session_objects.
 - Output: list of layer names missing geometry.
 
-**Callers:** `graph_lc/nodes.py` (geometry_guard_node), `followups.py` (missing_geometry_layers, has_geometry).
+**Callers:** `graph_lc/nodes.py` (geometry_guard_node), `followups.py` (missing_geometry_layers, has_geometry; imports from `guards.geometry_guard`).
 
 **Edge cases / errors:** Layers with no objects not reported. Case-insensitive layer matching.
 
 ---
 
-## agent/app/doc_only_guard.py
+## agent/app/guards/doc_only_guard.py
 
-**Purpose:** For DOC_ONLY questions, only use retrieved chunks (and call LLM) if the asked definition term appears in chunks. Prevents invented definitions.
+**Purpose:** For DOC_ONLY questions, only use retrieved chunks (and call LLM) if the asked definition term appears in chunks. Prevents invented definitions. Term matching normalizes smart/curly quotes and hyphenation.
 
 **Key functions:**
-- `extract_definition_term(question)` — Regex extraction for "what is meant by X", "definition of X", etc.
-- `term_appears_in_chunks(term, chunks)` — Normalized substring match.
+- `extract_definition_term(question)` — Regex extraction for "what is meant by X", "definition of X", etc.; returns normalized term (quotes stripped, hyphens as space).
+- `term_appears_in_chunks(term, chunks)` — Normalized substring match (chunk text normalized the same way).
 - `should_use_retrieved_for_doc_only(question, retrieved_chunks)` — False if term not in chunks; True if no term or term found.
 
 **Inputs/outputs:**
 - `should_use_retrieved_for_doc_only`: question, chunks; bool.
 
-**Callers:** `main.py` (_stream_answer_ndjson), `graph_lc/nodes.py` (llm_node).
+**Callers:** `rag/orchestrator.py` (stream_answer_ndjson), `graph_lc/nodes.py` (llm_node).
 
 **Edge cases / errors:** No term extracted → allow LLM. Empty chunks → False.
 
@@ -281,7 +275,7 @@ Folder-level, file-by-file documentation for `agent/app/`. All claims are derive
 **Purpose:** Handles "what's needed?"-style follow-ups after geometry guard. Returns checklist without retrieval/LLM.
 
 **Key functions:**
-- `is_needs_input_followup(question)` — Regex match for English/Turkish phrases (e.g. "what do you need", "ne lazım").
+- `is_needs_input_followup(question)` — Regex match for English phrases (e.g. "what do you need", "what's missing").
 - `get_missing_geometry_layers(session_objects)` — Uses geometry_guard logic.
 - `build_needs_input_message(missing_layers)` — Checklist string.
 
@@ -289,61 +283,37 @@ Folder-level, file-by-file documentation for `agent/app/`. All claims are derive
 - `is_needs_input_followup`: str; bool.
 - `build_needs_input_message`: list of layer names; formatted message.
 
-**Callers:** `graph_lc/nodes.py` (followup_node, finalize_node).
+**Callers:** `graph_lc/nodes.py` (followup_node, finalize_node). Imports `missing_geometry_layers`, `has_geometry` from `guards.geometry_guard`.
 
-**Edge cases / errors:** Circular import avoided by importing geometry_guard inside function.
+**Edge cases / errors:** None.
 
 ---
 
-## agent/app/prompts.py
+## agent/app/rag/prompts.py
 
-**Purpose:** String-based prompt templates (not LangChain). Hybrid and doc-only user prompts, chunk formatting helpers. **Used by tests; main flow uses `lc/prompts.py` (ChatPromptTemplate).**
+**Purpose:** Single source of truth for RAG prompt content (strings only; no LangChain at import time). SYSTEM_PROMPT, human template strings (HYBRID_HUMAN_TEMPLATE, DOC_ONLY_HUMAN_TEMPLATE), chunk formatting, and helpers for building full user prompt strings.
 
-**Key functions:**
-- `format_chunk`, `format_retrieved_chunks` — Chunk formatting for prompt.
-- `build_user_prompt`, `build_user_prompt_doc_only` — Build full user prompt string.
+**Key symbols/functions:**
+- `SYSTEM_PROMPT` — System message string.
+- `format_chunk_for_prompt`, `format_chunk` (alias), `format_retrieved_chunks` — Chunk formatting.
+- `build_user_prompt`, `build_user_prompt_doc_only` — Build full user prompt string (used by tests).
 
 **Inputs/outputs:**
 - `build_user_prompt`: question, json_objects, session_summary, retrieved_chunks; string.
 - `build_user_prompt_doc_only`: question, retrieved_chunks; string.
 
-**Callers:** `agent/tests/test_prompts.py`.
+**Callers:** `rag/chains.py` (builds ChatPromptTemplates from these strings), `agent/tests/test_prompts.py`.
 
 **Edge cases / errors:** Empty chunks → "No relevant excerpts found.". None page/section handled.
 
-**Potential refactors:** Content duplicated with `lc/prompts.py`. Consider removing or consolidating; tests could use lc prompts.
-
 ---
 
-## agent/app/lc/__init__.py
+## agent/app/rag/chains.py
 
-**Purpose:** Exports prompts and chains from lc package.
+**Purpose:** LCEL chains: doc_only_chain, hybrid_chain. Builds ChatPromptTemplate from rag/prompts strings; sync invoke and async stream helpers.
 
-**Key exports:** SYSTEM_PROMPT, HYBRID_PROMPT, DOC_ONLY_PROMPT; build_chains, invoke_doc_only, invoke_hybrid, astream_doc_only, astream_hybrid.
-
-**Callers:** Importers of `app.lc`.
-
----
-
-## agent/app/lc/prompts.py
-
-**Purpose:** LangChain ChatPromptTemplate prompts for doc_only and hybrid. Same content as app/prompts.py but LCEL-compatible.
-
-**Key symbols:**
-- `SYSTEM_PROMPT` — System message string.
-- `HYBRID_PROMPT` — ChatPromptTemplate: question, json_objects_pretty, layer_counts, plot_boundary_present, highways_present, limitations, retrieved_chunks_formatted.
-- `DOC_ONLY_PROMPT` — ChatPromptTemplate: question, retrieved_chunks_formatted.
-- `format_chunk_for_prompt(chunk_id, source, page, section, text)` — Format for prompt.
-
-**Callers:** `lc/chains.py`.
-
----
-
-## agent/app/lc/chains.py
-
-**Purpose:** LCEL chains: doc_only_chain, hybrid_chain. Sync invoke and async stream helpers.
-
-**Key functions:**
+**Key symbols/functions:**
+- `HYBRID_PROMPT`, `DOC_ONLY_PROMPT` — ChatPromptTemplate (built from SYSTEM_PROMPT + human templates in prompts.py).
 - `build_chains(model, api_key, temperature, max_tokens)` — Creates ChatOpenAI; chains DOC_ONLY_PROMPT | llm | StrOutputParser and HYBRID_PROMPT | llm | StrOutputParser.
 - `invoke_doc_only`, `invoke_hybrid` — Sync invoke.
 - `astream_doc_only`, `astream_hybrid` — Async generators yielding tokens.
@@ -353,9 +323,35 @@ Folder-level, file-by-file documentation for `agent/app/`. All claims are derive
 - `invoke_doc_only`: question, retrieved_chunks; answer string.
 - `invoke_hybrid`: question, json_objects, session_summary, retrieved_chunks; answer string.
 
-**Callers:** `main.py` (build_chains at startup, astream_*, DOC_ONLY_EMPTY_MESSAGE), `graph_lc/nodes.py` (invoke_doc_only, invoke_hybrid, DOC_ONLY_EMPTY_MESSAGE).
+**Callers:** `main.py` (build_chains at startup), `graph_lc/nodes.py` (llm_node: invoke_doc_only, invoke_hybrid, DOC_ONLY_EMPTY_MESSAGE), `rag/orchestrator.py` (stream_answer_ndjson: astream_*, DOC_ONLY_EMPTY_MESSAGE).
 
 **Edge cases / errors:** Empty chunks formatted as DOC_ONLY_EMPTY_MESSAGE for doc_only. Chains must be built before invoke.
+
+---
+
+## agent/app/rag/orchestrator.py
+
+**Purpose:** Answer orchestration: sync run and NDJSON stream. Keeps endpoint logic out of main.py.
+
+**Key functions:**
+- `run_answer(request, answer_graph)` — Invokes compiled graph; returns AnswerResponse.
+- `stream_answer_ndjson(request, reasoning_service, settings)` — Async generator: run_graph_until_route; if guard, finalize and emit; else stream doc_only or hybrid chain via astream_*; emit chunks + done. On exception yields `{"t":"error","message":...}`.
+
+**Inputs/outputs:**
+- `run_answer`: AnswerRequest, compiled StateGraph; AnswerResponse.
+- `stream_answer_ndjson`: request, reasoning_service, settings; yields NDJSON lines.
+
+**Callers:** `main.py` (/answer calls run_answer; /answer/stream uses stream_answer_ndjson).
+
+**Edge cases / errors:** Guard path emits chunk + done; main path streams then done. Exception yields error line.
+
+---
+
+## agent/app/rag/__init__.py
+
+**Purpose:** RAG package exports. Eager imports only for non–LangChain code (prompts, retrieval_postprocess) so tests can import prompts/postprocess without LangChain. LangChain-dependent symbols (build_chains, retrieve, run_answer, stream_answer_ndjson, HYBRID_PROMPT, DOC_ONLY_PROMPT, etc.) are lazy-loaded via `__getattr__`.
+
+**Callers:** `main.py` (build_chains, run_answer, stream_answer_ndjson), tests.
 
 ---
 
@@ -408,8 +404,8 @@ Folder-level, file-by-file documentation for `agent/app/`. All claims are derive
 - `followup_node` — Sets guard_result if needs_input + missing layers.
 - `summarize_node` — Computes session_summary via reasoning_service.
 - `route_node` — Sets query_mode, doc_only via routing.
-- `retrieve_node` — Calls retrieval_lc.retrieve; skips for json_only.
-- `llm_node` — Invokes doc_only or hybrid chain; doc_only guard applied.
+- `retrieve_node` — Calls rag.retrieval.retrieve; skips for json_only.
+- `llm_node` — Invokes doc_only or hybrid chain (rag.chains); doc_only guard (guards.doc_only_guard) applied.
 - `finalize_node` — For guard paths: sets answer_text, session_summary. Smalltalk/missing_geometry/needs_input messages.
 
 **Inputs/outputs:**
@@ -417,7 +413,7 @@ Folder-level, file-by-file documentation for `agent/app/`. All claims are derive
 
 **Callers:** `graph_builder.py` (wrappers).
 
-**Edge cases / errors:** JSON_ONLY skips retrieval. Doc-only guard: returns DOC_ONLY_EMPTY_MESSAGE when term not in chunks. Lazy import of retrieval_lc, chains, doc_only_guard inside nodes to avoid circular imports.
+**Edge cases / errors:** JSON_ONLY skips retrieval. Doc-only guard: returns DOC_ONLY_EMPTY_MESSAGE when term not in chunks. Lazy import of rag.retrieval, rag.chains, guards.doc_only_guard inside nodes to avoid circular imports.
 
 ---
 
@@ -441,12 +437,11 @@ Folder-level, file-by-file documentation for `agent/app/`. All claims are derive
 
 ## agent/app/main.py
 
-**Purpose:** FastAPI application entry. Lifespan: init vector_store, ingestion, reasoning, document_registry, sync_service, build chains, build graph, run sync. Endpoints: /health, /sync/status, /ingest, /answer, /answer/stream.
+**Purpose:** FastAPI application entry (thin controllers). Lifespan: init vector_store, ingest.ingestion (PDFIngestionService), reasoning, document_registry, sync_service, build chains (rag.build_chains), build graph (graph_lc.build_answer_graph), run sync. Endpoints: /health, /sync/status, /ingest, /answer, /answer/stream.
 
 **Key functions:**
-- `_run_answer_graph(request)` — Invokes compiled graph; returns AnswerResponse.
-- `_state_to_done_payload(state)` — Builds NDJSON done payload.
-- `_stream_answer_ndjson(request)` — Async generator: run_graph_until_route; if guard, finalize and emit; else stream doc_only or hybrid chain; emit chunks + done.
+- `/answer` — Calls rag.run_answer(request, answer_graph); returns AnswerResponse.
+- `/answer/stream` — Returns StreamingResponse(rag.stream_answer_ndjson(request, reasoning_service, settings)).
 - `_llm_available()` — Checks OPENAI_API_KEY set.
 
 **Inputs/outputs:**
@@ -454,8 +449,8 @@ Folder-level, file-by-file documentation for `agent/app/`. All claims are derive
 - `/answer/stream`: AnswerRequest; NDJSON stream.
 - `/ingest`: IngestRequest (force_reingest, delete_missing, source_id); IngestResponse.
 
-**Callers:** Uvicorn. Callees: config, models, ingestion, vector_store, reasoning, document_registry, sync_service, graph_lc, doc_only_guard, lc.chains.
+**Callers:** Uvicorn. Callees: config, models, ingest.ingestion, vector_store, reasoning, document_registry, sync_service, graph_lc (build_answer_graph), rag (build_chains, run_answer, stream_answer_ndjson).
 
-**Edge cases / errors:** 503 if services not initialized or LLM not configured. Streaming: guard path emits chunk + done; error yields `{"t":"error","message":...}`. Incremental sync on startup; delete_missing=False by default.
+**Edge cases / errors:** 503 if services not initialized or LLM not configured. Orchestration (including guard path and streaming) lives in rag/orchestrator.py. Incremental sync on startup; delete_missing=False by default.
 
 **Potential refactors:** Evidence not returned; backend QAResponse expects it. Consider adding evidence construction in finalize_node/AnswerResponse.

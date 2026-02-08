@@ -96,7 +96,7 @@ class TestAnswerEndpointSmalltalk:
         assert data["answer"].strip() == SMALLTALK_RESPONSE.strip()
 
     def test_hi_retrieval_not_called(self, client):
-        with patch("app.retrieval_lc.retrieve", MagicMock()) as mock_retrieve:
+        with patch("app.rag.retrieval.retrieve", MagicMock()) as mock_retrieve:
             client.post("/answer", json={"question": "hi", "session_objects": []})
             mock_retrieve.assert_not_called()
 
@@ -113,7 +113,7 @@ class TestAnswerEndpointSmalltalk:
 
     def test_hey_property_highway_uses_normal_rag(self, client):
         """Verify domain question is NOT treated as small talk (RAG path is used)."""
-        with patch("app.retrieval_lc.retrieve", MagicMock(return_value=[])) as mock_retrieve:
+        with patch("app.rag.retrieval.retrieve", MagicMock(return_value=[])) as mock_retrieve:
             with patch("app.graph_lc.nodes.invoke_hybrid", return_value="Some answer."):
                 response = client.post(
                     "/answer",

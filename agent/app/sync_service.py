@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from .config import get_settings
 from .document_registry import DocumentRegistry, DocumentStatus
-from .ingestion import PDFIngestionService
+from .ingest.ingestion import PDFIngestionService
 from .vector_store import VectorStoreService
 
 logger = logging.getLogger(__name__)
