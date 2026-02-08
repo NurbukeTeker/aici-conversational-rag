@@ -24,7 +24,7 @@ This project implements a **hybrid Retrieval-Augmented Generation (RAG)** system
 
 **Components and responsibilities:**
 
-- **Frontend (React):** Question input, JSON editor for drawing objects, answer and evidence display, login/register.
+- **Frontend (React):** Question input, JSON editor for drawing objects, answer display, login/register.
 - **Backend (FastAPI):**
   - **Owns auth + session.** JWT authentication; session management in Redis with TTL.
   - Forwards **question + latest session objects** to the Agent on every Q&A request.
@@ -65,7 +65,7 @@ This project implements a **hybrid Retrieval-Augmented Generation (RAG)** system
    - current session object list (pretty-printed);
    - session summary (layer counts, flags).
 6. **LLM generates the answer** in one reasoning step.
-7. **Evidence** (document chunks used, session layers/indices used) is returned with the answer.
+7. The Agent returns **answer**, **query_mode**, and **session_summary**.
 
 **The LLM receives both persistent document excerpts and ephemeral session objects in one reasoning step, ensuring answers reflect the current session state.**
 
@@ -73,10 +73,9 @@ This project implements a **hybrid Retrieval-Augmented Generation (RAG)** system
 
 ## 5. Prompt Design
 
-- **System prompt** enforces: retrieved documents are authoritative; JSON is ground truth for the drawing; no inventing objects or rules; cite short phrases; end with the Evidence sentence; do not infer when geometry is missing.
+- **System prompt** enforces: retrieved documents are authoritative; JSON is ground truth for the drawing; no inventing objects or rules; cite short phrases; do not infer when geometry is missing.
 - **User prompt** includes: question, pretty-printed session JSON, session summary (layer counts, plot boundary present, highways present, limitations), and retrieved regulatory excerpts. A **session summary** reduces prompt noise while keeping presence/context.
 - **Doc-only routing:** For definition-style questions (e.g. “What is the definition of a highway?”), the Agent uses a **doc-only** prompt (question + retrieved chunks only, no session JSON/summary). For hybrid questions (e.g. “Does this property front a highway?”), the full prompt with JSON and summary is used.
-- **Evidence** is required: the model is instructed to end with a fixed sentence; the API returns structured evidence (document chunks + session layers/indices) for the UI.
 
 ---
 
@@ -113,19 +112,6 @@ The AI Agent service is implemented using LangChain and LangGraph as the primary
 
 There is no separate legacy pipeline; the LangGraph workflow is the single source of truth.
 
-### 6.2 Evidence pipeline (strict correctness)
-
-**When evidence is shown (UI):**
-- **JSON_ONLY:** The Evidence section is **not rendered** at all (answers depend only on session JSON).
-- **DOC_ONLY / HYBRID:** Evidence is shown but **collapsed by default**; the header shows “Sources: N document excerpts · M session objects”. A debug section “Retrieved but not used” appears only in dev mode when `include_debug: true` is set.
-
-**Strict rules:**
-- **DOC_ONLY:** Vector retrieval **must** run. Only chunks that contain the defined term and definition phrasing (e.g. “TERM – is a …”, “means”, “is defined as”) appear in `evidence.document_chunks`. If no chunk matches, the answer states “No explicit definition was found in the retrieved excerpts.” and `document_chunks` is empty (no hallucination).
-- **JSON_ONLY:** Retrieval is **not** called. `evidence.document_chunks` is always empty. Only session layers/indices may appear in evidence; the UI does not show document evidence.
-- **HYBRID:** Retrieval runs; evidence may include 1–3 doc chunks plus session layers. For missing-geometry guard answers, evidence includes the missing layers and optionally one regulatory excerpt.
-
-**Retrieved vs used:** Only **used** chunks (those that pass the definition/relevance filter) appear in `evidence.document_chunks`. Raw similarity results are **retrieved** internally; they appear only in `debug.retrieved_chunks` when `include_debug: true` (or in dev in the UI).
-
 ---
 
 ## 7. Running the System Locally (Quickstart)
@@ -143,7 +129,7 @@ docker compose up --build
 ```
 
 - **Frontend:** http://localhost:3000  
-- **Flow:** Register → paste/edit JSON in the editor → **Update Session** → ask questions. Answers and evidence appear in the Q&A panel.
+- **Flow:** Register → paste/edit JSON in the editor → **Update Session** → ask questions. Answers appear in the Q&A panel.
 
 Place PDFs in `data/pdfs/` before or after first run; ingestion runs on agent startup.
 
@@ -187,8 +173,6 @@ Evaluators can use these to validate behavior:
 - **Redis for ephemeral state:** Fast, TTL-based expiry, user-scoped keys (`session:{user_id}:objects`). Fits “latest session per user” without embedding.
 - **Agent is stateless:** Simplifies scaling and security; session is always supplied by the backend so the Agent never stores user data.
 - **Single-step reasoning:** One retrieval + one LLM call per question. Keeps latency and complexity low; sufficient for hybrid RAG with clear prompt design.
-- **Evidence returned:** Enables auditable answers; UI shows which document chunks and which JSON layers were used.
-- **Evidence Policy (explicit):** Evidence is shown only when it directly supports the answer. Document excerpts appear only when the answer is grounded in PDF content (source, page, snippet). Session (JSON) evidence appears only when the answer relies on drawing data (layers and object indices). For answers that do not use documents or session (e.g. smalltalk, geometry-missing guards, follow-up prompts), the UI shows an explicit message that the answer is from system-level validation or missing input, not retrieved knowledge—no fabricated or decorative evidence.
 - **Session summary:** Reduces token usage and noise while preserving layer counts and key flags (e.g. plot boundary, highways present).
 - **Embedding model:** ChromaDB default is used; the pipeline can be swapped to another embedding model by configuring ChromaDB or replacing the vector store implementation.
 - **LangChain + LangGraph:** Retrieval (LangChain Chroma), prompts/chains (LCEL), and orchestration (StateGraph) are the single implementation for `/answer` and `/answer/stream`.
@@ -202,7 +186,6 @@ These go beyond a minimal hybrid RAG implementation:
 - **Incremental PDF ingestion with content hashing** — Document registry (SHA256) for NEW/UNCHANGED/UPDATED/DELETED; only changed PDFs are re-ingested.
 - **Streaming answers** — `POST /answer/stream` (NDJSON) and WebSocket `/ws/qa` for token-by-token display.
 - **Geometry guards** — Deterministic answers when spatial questions are asked but required layers lack geometry; avoids LLM hallucination.
-- **Evidence extraction** — Structured evidence (document chunks + session layers/indices) returned with every answer.
 - **Session summaries** — Layer counts and flags computed per request and included in the prompt.
 - **Doc-only routing** — Definition-style questions use a prompt without session JSON to avoid distraction.
 - **Smalltalk handling** — Greetings get a fixed response without retrieval or LLM.
@@ -223,9 +206,7 @@ These go beyond a minimal hybrid RAG implementation:
 │   ├── app/           # main, auth, session, database, user_service, export_service
 │   └── Dockerfile
 ├── agent/             # FastAPI — hybrid RAG
-│   ├── app/           # main, ingestion, vector_store, document_registry, sync_service,
-│   │                  # lc/ (prompts, chains), retrieval_lc, graph_lc/ (state, nodes, graph_builder),
-│   │                  # reasoning, routing, smalltalk, geometry_guard, doc_only_guard, followups
+│   ├── app/           # See "Agent code map" below
 │   └── Dockerfile
 ├── data/
 │   ├── pdfs/          # Place PDFs here
@@ -234,6 +215,22 @@ These go beyond a minimal hybrid RAG implementation:
 ├── env.example
 └── README.md
 ```
+
+### 12.1 Agent code map
+
+Single source of truth for the agent workflow; no duplicate graph or retrieval implementations.
+
+| Area | Location | Role |
+|------|----------|------|
+| **API** | `agent/app/main.py` | Thin controllers: `/health`, `/sync/status`, `/ingest`, `/answer`, `/answer/stream`. Delegates answer logic to `rag.orchestrator`. |
+| **Orchestration** | `agent/app/rag/orchestrator.py` | `run_answer(request, graph)` for sync; `stream_answer_ndjson(request, reasoning_service, settings)` for NDJSON stream. |
+| **Graph** | `agent/app/graph_lc/` | Single graph implementation: `state.py`, `nodes.py`, `graph_builder.py`. `build_answer_graph()`, `run_graph_until_route()`. |
+| **RAG** | `agent/app/rag/` | Prompts (`prompts.py`), LCEL chains (`chains.py`), retrieval (`retrieval.py`: `retrieve(question)`; `retrieval_postprocess.py`: `postprocess(chunks)`), orchestration (`orchestrator.py`). LangChain + LangGraph used throughout. |
+| **Guards** | `agent/app/guards/` | `doc_only_guard.py`, `geometry_guard.py`. Used by graph nodes and orchestrator. |
+| **Ingestion** | `agent/app/ingest/` | `ingestion.py`: `PDFIngestionService`. Used by `sync_service`. |
+| **Shared** | `agent/app/` | `config`, `models`, `chroma_client`, `vector_store`, `document_registry`, `sync_service`, `reasoning`, `routing`, `smalltalk`, `followups`. |
+
+For file-by-file details, see [docs/AGENT_CODE_GUIDE.md](docs/AGENT_CODE_GUIDE.md).
 
 ---
 
@@ -312,6 +309,12 @@ These questions ask for general regulatory rules (not drawing-specific). Answers
 Users can modify the JSON object list and re-run the same question. Answers change immediately based on the updated session state.
 
 ![Session Update](./screenshots/session-update.png)
+
+#### Two Users / Separate Sessions
+
+Opening the app in an incognito window (or logged in as another user) demonstrates session isolation: each user has their own session with separate JSON and Q&A state. The second user sees a different session and can work with different drawing data without affecting the first user.
+
+![Two Users / Separate Sessions](./screenshots/two-user.png)
 
 ### 5) Export / Download
 

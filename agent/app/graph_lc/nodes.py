@@ -6,9 +6,9 @@ import logging
 from typing import Any
 
 from .. import smalltalk
-from .. import geometry_guard
 from .. import followups
 from .. import routing
+from ..guards import geometry_guard
 from .state import GraphState
 
 logger = logging.getLogger(__name__)
@@ -92,8 +92,8 @@ def route_node(state: GraphState) -> dict[str, Any]:
 
 
 def retrieve_node(state: GraphState) -> dict[str, Any]:
-    """Retrieve via retrieval_lc; skip retrieval for JSON_ONLY."""
-    from ..retrieval_lc import retrieve
+    """Retrieve via rag.retrieval; skip retrieval for JSON_ONLY."""
+    from ..rag.retrieval import retrieve
 
     settings = state.get("_settings")
     question = state.get("question", "")
@@ -115,8 +115,8 @@ def retrieve_node(state: GraphState) -> dict[str, Any]:
 
 def llm_node(state: GraphState) -> dict[str, Any]:
     """Invoke LCEL chain (doc_only or hybrid)."""
-    from ..lc.chains import DOC_ONLY_EMPTY_MESSAGE, invoke_doc_only, invoke_hybrid
-    from ..doc_only_guard import should_use_retrieved_for_doc_only
+    from ..rag.chains import DOC_ONLY_EMPTY_MESSAGE, invoke_doc_only, invoke_hybrid
+    from ..guards.doc_only_guard import should_use_retrieved_for_doc_only
 
     question = state.get("question", "")
     session_objects = state.get("session_objects", [])

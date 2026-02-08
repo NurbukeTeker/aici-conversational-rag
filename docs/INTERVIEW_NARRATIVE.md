@@ -67,7 +67,7 @@ User → Frontend (React) → Backend (FastAPI) → Agent (FastAPI + LangGraph)
 
 ### C. Data Flow (Persistent vs Ephemeral)
 
-*"Persistent: PDFs in ChromaDB. Chunked with RecursiveCharacterTextSplitter, 1000 chars, 200 overlap—`agent/app/ingestion.py`. Metadata: source, page, chunk_id, optional section. Incremental sync via SHA256 in the document registry—`agent/app/sync_service.py`."*
+*"Persistent: PDFs in ChromaDB. Chunked with RecursiveCharacterTextSplitter, 1000 chars, 200 overlap—`agent/app/ingest/ingestion.py`. Metadata: source, page, chunk_id, optional section. Incremental sync via SHA256 in the document registry—`agent/app/sync_service.py`."*
 
 *"Ephemeral: session objects in Redis. Keys `session:{user_id}:objects` and `session:{user_id}:meta`. TTL 3600s; refreshed on PUT. Never embedded. Sent in full (or summarized) in the HYBRID prompt."*
 
@@ -79,11 +79,11 @@ User → Frontend (React) → Backend (FastAPI) → Agent (FastAPI + LangGraph)
 
 ### E. Retrieval & Prompt Construction (How You Prevent Hallucinations)
 
-*"Retrieval: top-k 5, optional max_distance filter. Postprocess: max 2 chunks per (source, page), sort by distance. `agent/app/retrieval.py:postprocess_retrieved_chunks`."*
+*"Retrieval: top-k 5, optional max_distance filter. Postprocess: max 2 chunks per (source, page), sort by distance. `agent/app/rag/retrieval_postprocess.py:postprocess`; retrieval in `agent/app/rag/retrieval.py`."*
 
-*"Doc-only guard: `agent/app/doc_only_guard.py:should_use_retrieved_for_doc_only()`. For definition-style questions, we only call the LLM if the asked term appears in retrieved chunks. Otherwise we return 'No explicit definition was found in the retrieved documents.'—`agent/app/lc/chains.py:DOC_ONLY_EMPTY_MESSAGE`."*
+*"Doc-only guard: `agent/app/guards/doc_only_guard.py:should_use_retrieved_for_doc_only()`. For definition-style questions, we only call the LLM if the asked term appears in retrieved chunks. Otherwise we return 'No explicit definition was found in the retrieved documents.'—`agent/app/rag/chains.py:DOC_ONLY_EMPTY_MESSAGE`."*
 
-*"Prompt: system prompt forbids inventing objects, measurements, or rules. Treats retrieved docs as authoritative and JSON as ground truth. `agent/app/lc/prompts.py:SYSTEM_PROMPT`."*
+*"Prompt: system prompt forbids inventing objects, measurements, or rules. Treats retrieved docs as authoritative and JSON as ground truth. `agent/app/rag/prompts.py:SYSTEM_PROMPT`."*
 
 ### F. Evidence Policy (Used vs Retrieved; What UI Shows)
 
@@ -95,7 +95,7 @@ User → Frontend (React) → Backend (FastAPI) → Agent (FastAPI + LangGraph)
 
 ### G. Streaming Path (If Implemented)
 
-*"Implemented. Frontend connects WebSocket `/api/ws/qa?token=<jwt>`. Backend decodes token, accepts WS, streams POST to Agent `/answer/stream`. Agent runs `run_graph_until_route`—`agent/app/graph_lc/graph_builder.py:run_graph_until_route`—then streams via `astream_doc_only` or `astream_hybrid` from `agent/app/lc/chains.py`. NDJSON: `{\"t\":\"chunk\",\"c\":\"...\"}` then `{\"t\":\"done\",\"answer\":\"...\",\"session_summary\":{...}}`. Backend forwards each line. Frontend appends chunks; human-speed reveal ~35 chars/sec—`frontend/src/pages/Dashboard.jsx:147-184`."*
+*"Implemented. Frontend connects WebSocket `/api/ws/qa?token=<jwt>`. Backend decodes token, accepts WS, streams POST to Agent `/answer/stream`. Agent uses `rag.orchestrator.stream_answer_ndjson()`: runs `run_graph_until_route`—`agent/app/graph_lc/graph_builder.py:run_graph_until_route`—then streams via `astream_doc_only` or `astream_hybrid` from `agent/app/rag/chains.py`. NDJSON: `{\"t\":\"chunk\",\"c\":\"...\"}` then `{\"t\":\"done\",\"answer\":\"...\",\"session_summary\":{...}}`. Backend forwards each line. Frontend appends chunks; human-speed reveal ~35 chars/sec—`frontend/src/pages/Dashboard.jsx:147-184`."*
 
 ### H. Failure Modes + Deterministic Guards
 
@@ -143,9 +143,9 @@ User → Frontend (React) → Backend (FastAPI) → Agent (FastAPI + LangGraph)
 | **Redis for session** | TTL, fast, key-value fit | DB table, in-memory | Redis dependency; TTL means sessions expire |
 | **TTL refresh on update** | Keeps active sessions alive | Fixed TTL only | Slightly more Redis writes |
 | **Retrieval top-k 5** | Balance relevance vs noise | Higher k, lower k | Configurable in `agent/app/config.py:retrieval_top_k`; 5 is default |
-| **Max 2 chunks per (source, page)** | Avoid same-page dominance | No limit | May drop marginally relevant chunks; `agent/app/retrieval.py:MAX_CHUNKS_PER_PAGE` |
+| **Max 2 chunks per (source, page)** | Avoid same-page dominance | No limit | May drop marginally relevant chunks; `agent/app/rag/retrieval_postprocess.py:MAX_CHUNKS_PER_PAGE` |
 | **Keyword routing** | No LLM, fast, deterministic | LLM-based routing | Edge cases; keywords need tuning |
-| **Doc-only guard** | Prevents invented definitions | Always call LLM | May block when term paraphrased; `agent/app/doc_only_guard.py:should_use_retrieved_for_doc_only` |
+| **Doc-only guard** | Prevents invented definitions | Always call LLM | May block when term paraphrased; `agent/app/guards/doc_only_guard.py:should_use_retrieved_for_doc_only` |
 | **Payload limit 512 KB** | Protect backend | No limit | Large drawings rejected; `backend/app/models.py:MAX_PAYLOAD_SIZE_KB` |
 | **Argon2 password hashing** | SOTA, no 72-byte limit | bcrypt, scrypt | Slightly slower; `backend/app/auth.py:17` |
 | **Single LangGraph workflow** | One source of truth | Separate pipelines | All paths go through same nodes; guards short-circuit |
@@ -181,16 +181,16 @@ A: TTL 3600s on both keys. Refreshed on every PUT. If expired, `get_objects` ret
 ### RAG Quality
 
 **Q: How are PDFs chunked?**  
-A: RecursiveCharacterTextSplitter, chunk_size 1000, overlap 200. `agent/app/ingestion.py`. Separators: `["\n\n", "\n", ". ", " ", ""]`.
+A: RecursiveCharacterTextSplitter, chunk_size 1000, overlap 200. `agent/app/ingest/ingestion.py`. Separators: `["\n\n", "\n", ". ", " ", ""]`.
 
 **Q: What embedding model does Chroma use?**  
 A: Chroma default; not explicitly set in code. `agent/app/chroma_client.py` and `config.py` do not specify embedding model. Unverified: Chroma default is typically all-MiniLM-L6-v2.
 
 **Q: How do you prevent citation hallucination?**  
-A: Doc-only guard: only call LLM if asked term appears in chunks—`agent/app/doc_only_guard.py:should_use_retrieved_for_doc_only`. Otherwise return DOC_ONLY_EMPTY_MESSAGE. System prompt forbids inventing—`agent/app/lc/prompts.py:SYSTEM_PROMPT`.
+A: Doc-only guard: only call LLM if asked term appears in chunks—`agent/app/guards/doc_only_guard.py:should_use_retrieved_for_doc_only`. Otherwise return DOC_ONLY_EMPTY_MESSAGE. System prompt forbids inventing—`agent/app/rag/prompts.py:SYSTEM_PROMPT`.
 
 **Q: What is retrieval_top_k and max_distance?**  
-A: top_k=5, max_distance=None (no filter) by default. `agent/app/config.py`. Postprocess keeps max 2 chunks per (source, page)—`agent/app/retrieval.py`.
+A: top_k=5, max_distance=None (no filter) by default. `agent/app/config.py`. Postprocess keeps max 2 chunks per (source, page)—`agent/app/rag/retrieval_postprocess.py`.
 
 ### Debuggability / Observability
 

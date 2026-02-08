@@ -64,7 +64,7 @@ def get_missing_geometry_layers(session_objects: list[dict]) -> list[str]:
     Prefer: Highway and Plot Boundary if they exist and lack geometry.
     If all geometries are null, include all layers present (or at least Highway + Plot Boundary if present).
     """
-    from .geometry_guard import missing_geometry_layers, has_geometry
+    from .guards.geometry_guard import missing_geometry_layers, has_geometry
 
     if not session_objects:
         return []

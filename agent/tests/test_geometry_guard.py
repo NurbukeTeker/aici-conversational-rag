@@ -2,7 +2,7 @@
 import pytest
 from unittest.mock import patch, MagicMock
 
-from app.geometry_guard import (
+from app.guards.geometry_guard import (
     is_spatial_question,
     should_trigger_geometry_guard,
     required_layers_for_question,
@@ -165,7 +165,7 @@ class TestGeometryGuardIntegration:
             "question": "Does this property front a highway if no geometry is provided?",
             "session_objects": session_objects,
         }
-        with patch("app.retrieval_lc.retrieve", MagicMock(return_value=[])) as mock_retrieve:
+        with patch("app.rag.retrieval.retrieve", MagicMock(return_value=[])) as mock_retrieve:
             with patch("app.graph_lc.nodes.invoke_hybrid", MagicMock(return_value="Yes.")):
                 resp = client.post("/answer", json=request_body)
         if resp.status_code == 503:
@@ -193,7 +193,7 @@ class TestGeometryGuardIntegration:
             "question": "what it needs?",
             "session_objects": session_objects,
         }
-        with patch("app.retrieval_lc.retrieve", MagicMock(return_value=[])) as mock_retrieve:
+        with patch("app.rag.retrieval.retrieve", MagicMock(return_value=[])) as mock_retrieve:
             with patch("app.graph_lc.nodes.invoke_hybrid", MagicMock(return_value="Generic long answer.")):
                 resp = client.post("/answer", json=request_body)
         if resp.status_code == 503:

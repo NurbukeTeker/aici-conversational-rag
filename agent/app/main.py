@@ -1,5 +1,4 @@
 """Agent service - FastAPI application. LangChain + LangGraph primary framework."""
-import json
 import logging
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -13,15 +12,13 @@ from .models import (
     AnswerRequest, AnswerResponse,
     IngestRequest, IngestResponse, HealthResponse, SyncStatusResponse, DocumentInfo
 )
-from .ingestion import PDFIngestionService
+from .ingest.ingestion import PDFIngestionService
 from .vector_store import VectorStoreService
 from .reasoning import ReasoningService
 from .document_registry import DocumentRegistry
 from .sync_service import DocumentSyncService
-from .graph_lc import build_answer_graph, run_graph_until_route
-from .graph_lc import nodes as graph_nodes
-from .doc_only_guard import should_use_retrieved_for_doc_only
-from .lc.chains import DOC_ONLY_EMPTY_MESSAGE, build_chains, astream_doc_only, astream_hybrid
+from .graph_lc import build_answer_graph
+from .rag import build_chains, run_answer, stream_answer_ndjson
 
 # Configure logging
 logging.basicConfig(
@@ -191,22 +188,6 @@ async def ingest_documents(request: IngestRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-def _run_answer_graph(request: AnswerRequest) -> AnswerResponse:
-    """Run LangGraph workflow and return AnswerResponse."""
-    if not answer_graph:
-        raise HTTPException(status_code=503, detail="Answer workflow not initialized")
-    initial_state = {
-        "question": request.question,
-        "session_objects": request.session_objects,
-    }
-    final_state = answer_graph.invoke(initial_state)
-    return AnswerResponse(
-        answer=final_state.get("answer_text", ""),
-        query_mode=final_state.get("query_mode"),
-        session_summary=final_state.get("session_summary"),
-    )
-
-
 @app.post("/answer", response_model=AnswerResponse)
 async def answer_question(request: AnswerRequest):
     """Answer a question using LangChain + LangGraph hybrid RAG."""
@@ -214,82 +195,15 @@ async def answer_question(request: AnswerRequest):
         raise HTTPException(status_code=503, detail="Services not initialized")
     if not _llm_available():
         raise HTTPException(status_code=503, detail="LLM service not configured (missing API key)")
+    if not answer_graph:
+        raise HTTPException(status_code=503, detail="Answer workflow not initialized")
     try:
-        return _run_answer_graph(request)
+        return run_answer(request, answer_graph)
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error answering question: {e}")
+        logger.error("Error answering question: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
-
-
-def _state_to_done_payload(state: dict) -> dict:
-    """Build NDJSON done payload from graph state."""
-    session_summary = state.get("session_summary")
-    if session_summary is not None and hasattr(session_summary, "model_dump"):
-        session_summary = session_summary.model_dump()
-    return {
-        "t": "done",
-        "answer": state.get("answer_text", ""),
-        "query_mode": state.get("query_mode"),
-        "session_summary": session_summary,
-    }
-
-
-async def _stream_answer_ndjson(request: AnswerRequest):
-    """Async generator: run graph nodes until route, stream LLM via LCEL astream, then finalize. Single source of truth: graph_lc nodes."""
-    if not vector_store or not reasoning_service:
-        yield json.dumps({"t": "error", "message": "Services not initialized"}) + "\n"
-        return
-    if not _llm_available():
-        yield json.dumps({"t": "error", "message": "LLM not configured"}) + "\n"
-        return
-    try:
-        settings = get_settings()
-        state = run_graph_until_route(request, reasoning_service, settings)
-
-        # Guard path: finalize and emit chunk + done
-        if state.get("guard_result"):
-            state.update(graph_nodes.finalize_node(state))
-            answer_text = state.get("answer_text", "")
-            yield json.dumps({"t": "chunk", "c": answer_text}) + "\n"
-            yield json.dumps(_state_to_done_payload(state)) + "\n"
-            return
-
-        # Main path: stream LLM, then finalize
-        retrieved_docs = state.get("retrieved_docs", [])
-        doc_only = state.get("doc_only", False)
-        session_summary = state.get("session_summary")
-        session_summary_dict = session_summary.model_dump() if session_summary else {}
-
-        full_answer_chunks = []
-        if doc_only:
-            if not retrieved_docs or not should_use_retrieved_for_doc_only(request.question, retrieved_docs):
-                override_msg = DOC_ONLY_EMPTY_MESSAGE
-                state["answer_text"] = override_msg
-                yield json.dumps({"t": "chunk", "c": override_msg}) + "\n"
-            else:
-                async for chunk in astream_doc_only(request.question, retrieved_docs):
-                    full_answer_chunks.append(chunk)
-                    yield json.dumps({"t": "chunk", "c": chunk}) + "\n"
-                state["answer_text"] = "".join(full_answer_chunks)
-        else:
-            async for chunk in astream_hybrid(
-                request.question,
-                request.session_objects,
-                session_summary_dict,
-                retrieved_docs,
-            ):
-                full_answer_chunks.append(chunk)
-                yield json.dumps({"t": "chunk", "c": chunk}) + "\n"
-            state["answer_text"] = "".join(full_answer_chunks)
-
-        state.update(graph_nodes.finalize_node(state))
-        yield json.dumps(_state_to_done_payload(state)) + "\n"
-
-    except Exception as e:
-        logger.error(f"Error streaming answer: {e}")
-        yield json.dumps({"t": "error", "message": str(e)}) + "\n"
 
 
 @app.post("/answer/stream")
@@ -302,8 +216,9 @@ async def answer_question_stream(request: AnswerRequest):
         raise HTTPException(status_code=503, detail="Services not initialized")
     if not _llm_available():
         raise HTTPException(status_code=503, detail="LLM service not configured (missing API key)")
+    settings = get_settings()
     return StreamingResponse(
-        _stream_answer_ndjson(request),
+        stream_answer_ndjson(request, reasoning_service, settings),
         media_type="application/x-ndjson",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

@@ -15,7 +15,7 @@ _chroma_client = None
 
 
 def get_chroma_client() -> chromadb.PersistentClient:
-    """Single Chroma PersistentClient with fixed settings. Used by VectorStoreService and retrieval_lc."""
+    """Single Chroma PersistentClient with fixed settings. Used by VectorStoreService and rag.retrieval."""
     global _chroma_client
     if _chroma_client is not None:
         return _chroma_client
