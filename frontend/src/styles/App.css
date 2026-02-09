@@ -154,6 +154,19 @@
   justify-content: space-between;
   background: var(--color-surface-muted);
   transition: background-color var(--transition-base), border-color var(--transition-base);
+  gap: 1rem;
+}
+
+.panel-header .panel-title {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.panel-header .export-buttons {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .panel-title {
@@ -339,15 +352,17 @@
 
 /* Export Buttons */
 .export-buttons {
-  display: flex;
+  display: flex !important;
   align-items: center;
   gap: 0.5rem;
+  visibility: visible !important;
+  opacity: 1 !important;
 }
 
 .btn-icon {
   width: 32px;
   height: 32px;
-  display: flex;
+  display: flex !important;
   align-items: center;
   justify-content: center;
   background: var(--color-surface-muted);
@@ -356,6 +371,8 @@
   color: var(--color-text-secondary);
   cursor: pointer;
   transition: all var(--transition-base);
+  visibility: visible !important;
+  opacity: 1 !important;
 }
 
 .btn-icon svg {
