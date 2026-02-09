@@ -1,6 +1,13 @@
 """Pydantic models for Agent service."""
 from pydantic import BaseModel, Field
-from typing import Any, Literal
+from typing import Any
+
+
+class DrawingObject(BaseModel):
+    """A single drawing object from the session JSON."""
+    layer: str = Field(..., description="Layer name (e.g., Highway, Walls, Doors)")
+    type: str = Field(default="unknown", description="Object type")
+    properties: dict[str, Any] = Field(default_factory=dict, description="Object properties")
 
 
 class SessionSummary(BaseModel):
@@ -10,6 +17,10 @@ class SessionSummary(BaseModel):
     highways_present: bool = False
     total_objects: int = 0
     limitations: list[str] = Field(default_factory=list)
+    spatial_analysis: dict[str, Any] | None = Field(
+        default=None,
+        description="Spatial relationship analysis (property-highway fronting, distances, etc.)"
+    )
 
 
 class AnswerRequest(BaseModel):
@@ -21,10 +32,31 @@ class AnswerRequest(BaseModel):
     )
 
 
+class ChunkEvidence(BaseModel):
+    """Evidence from a retrieved document chunk."""
+    chunk_id: str
+    source: str
+    page: str | None = None
+    section: str | None = None
+    text_snippet: str
+
+
+class ObjectEvidence(BaseModel):
+    """Evidence from session objects."""
+    layers_used: list[str]
+    object_indices: list[int]
+
+
+class Evidence(BaseModel):
+    """Combined evidence for answer."""
+    document_chunks: list[ChunkEvidence] = Field(default_factory=list)
+    session_objects: ObjectEvidence | None = None
+
+
 class AnswerResponse(BaseModel):
     """Response model for /answer endpoint."""
     answer: str
-    query_mode: Literal["doc_only", "json_only", "hybrid"] | None = Field(default=None, description="From routing")
+    evidence: Evidence
     session_summary: SessionSummary | None = None
 
 

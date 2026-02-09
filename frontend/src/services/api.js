@@ -15,7 +15,14 @@ class ApiError extends Error {
 function normalizeDetail(detail, fallback = 'Request failed') {
   if (typeof detail === 'string') return detail;
   if (Array.isArray(detail)) {
-    const parts = detail.map((e) => (e && e.msg) || (e && e.message) || JSON.stringify(e));
+    const parts = detail.map((e) => {
+      // Handle Pydantic validation errors with location info
+      if (e && e.msg) {
+        const loc = e.loc ? e.loc.filter(l => l !== 'body' && l !== 'objects').join(' → ') : '';
+        return loc ? `${loc}: ${e.msg}` : e.msg;
+      }
+      return (e && e.message) || JSON.stringify(e);
+    });
     return parts.length ? parts.join('; ') : fallback;
   }
   return detail != null ? String(detail) : fallback;
@@ -39,7 +46,12 @@ async function request(endpoint, options = {}) {
     let message = 'Request failed';
     try {
       const error = await response.json();
-      message = normalizeDetail(error.detail, message);
+      // Try detail first (Pydantic validation errors), then message, then details
+      message = normalizeDetail(error.detail || error.message || error.details, message);
+      // If we have a more specific message field, prefer it
+      if (error.message && typeof error.message === 'string' && error.message !== 'Invalid request data. Please check the format and try again.') {
+        message = error.message;
+      }
     } catch {
       message = response.statusText;
     }
@@ -122,15 +134,15 @@ export const healthApi = {
 // Export API
 export const exportApi = {
   /**
-   * Download dialogues as Excel file
+   * Download dialogues as CSV file
    * @param {Array} dialogues - Array of {question, answer, timestamp}
    * @param {Object} sessionSummary - Optional session context
-   * @returns {Promise<Blob>} Excel file blob
+   * @returns {Promise<Blob>} CSV file blob
    */
-  downloadExcel: async (dialogues, sessionSummary = null) => {
+  downloadCsv: async (dialogues, sessionSummary = null) => {
     const token = localStorage.getItem('token');
     
-    const response = await fetch(`${API_BASE}/export/excel`, {
+    const response = await fetch(`${API_BASE}/export/csv`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

@@ -42,8 +42,9 @@ function parseAnswerNarrative(text) {
 }
 
 const ALLOWED_OBJECT_KEYS = new Set(['type', 'layer', 'geometry', 'properties']);
+const VALID_TYPES = new Set(['LINE', 'POLYLINE', 'POLYGON', 'POINT', 'CIRCLE', 'ARC', 'TEXT', 'BLOCK']);
 
-/** Validate drawing objects: required keys (type, layer), no extra keys. */
+/** Validate drawing objects: required keys (type, layer), no extra keys, valid type values. */
 function validateSessionSchema(objects) {
   if (!Array.isArray(objects)) return { valid: false, message: 'Session must be a JSON array.' };
   for (let i = 0; i < objects.length; i++) {
@@ -62,6 +63,14 @@ function validateSessionSchema(objects) {
     const typeVal = obj.type;
     if (typeVal == null || String(typeVal).trim() === '') {
       return { valid: false, message: `Object at index ${i} is missing or empty "type". Each drawing object must have "type".` };
+    }
+    // Validate type value matches backend expectations
+    const typeUpper = String(typeVal).toUpperCase();
+    if (!VALID_TYPES.has(typeUpper)) {
+      return {
+        valid: false,
+        message: `Object at index ${i}: invalid type "${typeVal}". Must be one of: ${Array.from(VALID_TYPES).join(', ')}`,
+      };
     }
     const layerVal = obj.layer;
     if (layerVal == null || String(layerVal).trim() === '') {
@@ -111,7 +120,7 @@ function Dashboard() {
   const SCROLL_THRESHOLD_PX = 80;
   
   // Export state
-  const [exportingExcel, setExportingExcel] = useState(false);
+  const [exportingCsv, setExportingCsv] = useState(false);
   const [exportingJson, setExportingJson] = useState(false);
   const [exportMessage, setExportMessage] = useState(null);
 
@@ -242,11 +251,11 @@ function Dashboard() {
     const text = e.target.value;
     setJsonText(text);
     setSessionSaved(false);
+    setJsonError(''); // Clear backend errors when user edits JSON
 
     try {
       const parsed = JSON.parse(text);
       setJsonValid(true);
-      setJsonError('');
       const schema = validateSessionSchema(Array.isArray(parsed) ? parsed : []);
       setSchemaError(schema.valid ? null : schema.message);
     } catch (err) {
@@ -262,17 +271,23 @@ function Dashboard() {
     const schema = validateSessionSchema(Array.isArray(objects) ? objects : []);
     if (!schema.valid) {
       setSchemaError(schema.message);
+      setJsonError(''); // Clear any previous backend errors
       return;
     }
     setSchemaError(null);
+    setJsonError(''); // Clear previous errors before attempting save
     setSaving(true);
     try {
       await sessionApi.updateObjects(objects);
       setSessionSaved(true);
+      setJsonError(''); // Clear errors on success
     } catch (err) {
       if (err instanceof ApiError) {
         setJsonError(err.message);
+      } else {
+        setJsonError(err.message || 'Failed to update session');
       }
+      setSessionSaved(false);
     } finally {
       setSaving(false);
     }
@@ -423,37 +438,37 @@ function Dashboard() {
     }
   };
 
-  // Handle Excel download
-  const handleDownloadExcel = async () => {
+  // Handle CSV download
+  const handleDownloadCsv = async () => {
     if (messages.length === 0) return;
     
-    setExportingExcel(true);
+    setExportingCsv(true);
     setExportMessage(null);
     
     try {
       const dialogues = prepareDialoguesForExport();
       const sessionSummary = getSessionSummary();
       
-      const blob = await exportApi.downloadExcel(dialogues, sessionSummary);
+      const blob = await exportApi.downloadCsv(dialogues, sessionSummary);
       
       // Create download link
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `AICI_QA_Export_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      a.download = `AICI_QA_Export_${new Date().toISOString().slice(0, 10)}.csv`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
       
-      setExportMessage({ type: 'success', text: 'Excel downloaded!' });
+      setExportMessage({ type: 'success', text: 'CSV downloaded!' });
     } catch (err) {
       setExportMessage({ 
         type: 'error', 
         text: err instanceof ApiError ? err.message : 'Download failed'
       });
     } finally {
-      setExportingExcel(false);
+      setExportingCsv(false);
       setTimeout(() => setExportMessage(null), 3000);
     }
   };
@@ -561,17 +576,19 @@ function Dashboard() {
           
           <div className="panel-footer">
             <div className="flex justify-between items-center">
-              <div className={`json-status ${jsonValid && !schemaError ? 'valid' : 'invalid'}`}>
+              <div className={`json-status ${jsonValid && !schemaError && !jsonError ? 'valid' : 'invalid'}`}>
                 {!jsonValid
                   ? `Invalid JSON: ${jsonError}`
-                  : schemaError
-                    ? schemaError + ' Update session not applied.'
-                    : 'Valid JSON'}
+                  : jsonError
+                    ? jsonError
+                    : schemaError
+                      ? schemaError + ' Update session not applied.'
+                      : 'Valid JSON'}
               </div>
               <button
                 className="btn-primary"
                 onClick={handleSaveSession}
-                disabled={!jsonValid || !!schemaError || saving}
+                disabled={!jsonValid || !!schemaError || !!jsonError || saving}
               >
                 {saving ? 'Saving...' : sessionSaved ? 'Saved' : 'Update Session'}
               </button>
@@ -594,15 +611,15 @@ function Dashboard() {
               <div className="export-buttons">
                 <button
                   className="btn-icon"
-                  onClick={handleDownloadExcel}
-                  disabled={exportingExcel}
-                  title="Download as Excel"
+                  onClick={handleDownloadCsv}
+                  disabled={exportingCsv}
+                  title="Download as CSV"
                 >
-                  {exportingExcel ? (
+                  {exportingCsv ? (
                     <span className="spinner-small" />
                   ) : (
                     <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                     </svg>
                   )}
                 </button>

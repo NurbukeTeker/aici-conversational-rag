@@ -189,7 +189,7 @@ These go beyond a minimal hybrid RAG implementation:
 - **Session summaries** — Layer counts and flags computed per request and included in the prompt.
 - **Doc-only routing** — Definition-style questions use a prompt without session JSON to avoid distraction.
 - **Smalltalk handling** — Greetings get a fixed response without retrieval or LLM.
-- **Export** — Q&A dialogue export to Excel and JSON (backend).
+- **Export** — Q&A dialogue export to CSV and JSON (backend).
 - **LangGraph-based agent** — `/answer` and `/answer/stream` are implemented with LangChain + LangGraph (StateGraph, LCEL chains, LangChain Chroma).
 
 ---
@@ -320,7 +320,7 @@ Opening the app in an incognito window (or logged in as another user) demonstrat
 
 #### Downloading Results
 
-Users can download or export results (e.g. JSON or Excel, depending on implementation).
+Users can download or export results (e.g. CSV or JSON, depending on implementation).
 
 ![Download / Export](./screenshots/download.png)
 
