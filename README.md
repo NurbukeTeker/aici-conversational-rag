@@ -11,9 +11,12 @@ Click the image below to watch a short walkthrough of the system, including:
 - Hybrid RAG question routing
 - Geometry guard behavior
 - Live answer updates
+https://www.loom.com/share/5518a5df79604adba684b5ccefa017ed
 
-[![Watch the demo](https://cdn.loom.com/sessions/thumbnails/5518a5df79604adba684b5ccefa017ed-with-play.gif)](https://www.loom.com/share/5518a5df79604adba684b5ccefa017ed)
----
+A short Loom demo showcasing the hybrid RAG agent in action.
+
+▶️ [https://www.loom.com/share/5518a5df79604adba684b5ccefa017ed](https://www.loom.com/share/5518a5df79604adba684b5ccefa017ed)
+
 
 ## 2. Architecture Overview
 
