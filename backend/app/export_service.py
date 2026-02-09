@@ -56,14 +56,18 @@ class ExportService:
                     parts.append(f"Objects: {so['objects_count']}")
                 session_text = "; ".join(parts)
             
-            # Write row
+            # Write row (ensure all values are strings, handle None values, escape newlines)
+            question = str(dialogue.get("question", "") or "").replace('\n', ' ').replace('\r', ' ')
+            answer = str(dialogue.get("answer", "") or "").replace('\n', ' ').replace('\r', ' ')
+            timestamp = str(dialogue.get("timestamp", "") or "")
+            
             row_data = [
                 idx,
-                dialogue.get("question", ""),
-                dialogue.get("answer", ""),
-                evidence_text,
-                session_text,
-                dialogue.get("timestamp", "")
+                question,
+                answer,
+                evidence_text or "",
+                session_text or "",
+                timestamp
             ]
             writer.writerow(row_data)
         

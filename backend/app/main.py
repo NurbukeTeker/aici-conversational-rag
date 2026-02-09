@@ -729,12 +729,13 @@ async def download_dialogue_json(
 
 @app.post("/export/csv")
 async def download_dialogue_csv(
-    data: ExportRequest,
+    request: Request,
     current_user: Annotated[TokenData, Depends(get_current_user)]
 ):
     """
     Download Q&A dialogues as CSV file.
     
+    Accepts JSON body with dialogues array and optional session_summary.
     Returns a CSV file with all dialogues and evidence.
     """
     if not current_user.user_id:
@@ -743,16 +744,55 @@ async def download_dialogue_csv(
             detail="Invalid user session"
         )
     
-    export_service = get_export_service()
+    try:
+        body = await request.json()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid JSON: {str(e)}"
+        )
     
-    # Convert dialogues to dict format
-    dialogues = [d.model_dump() for d in data.dialogues]
+    dialogues_raw = body.get("dialogues", [])
+    if not isinstance(dialogues_raw, list):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="dialogues must be an array"
+        )
+    
+    if len(dialogues_raw) == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="dialogues array cannot be empty"
+        )
+    
+    # Convert to dict format (handle plain dicts from frontend)
+    dialogues = []
+    for d in dialogues_raw:
+        if isinstance(d, dict):
+            dialogues.append({
+                "question": d.get("question", ""),
+                "answer": d.get("answer", ""),
+                "evidence": d.get("evidence"),
+                "timestamp": d.get("timestamp")
+            })
+        elif hasattr(d, 'model_dump'):
+            dialogues.append(d.model_dump())
+        else:
+            dialogues.append({
+                "question": getattr(d, 'question', ''),
+                "answer": getattr(d, 'answer', ''),
+                "evidence": getattr(d, 'evidence', None),
+                "timestamp": getattr(d, 'timestamp', None)
+            })
+    
+    export_service = get_export_service()
+    session_summary = body.get("session_summary")
     
     # Generate CSV
     csv_bytes = export_service.create_dialogue_csv(
         dialogues=dialogues,
         username=current_user.username or "user",
-        session_summary=data.session_summary
+        session_summary=session_summary
     )
     
     # Generate filename
@@ -763,9 +803,10 @@ async def download_dialogue_csv(
     
     return Response(
         content=csv_bytes,
-        media_type="text/csv",
+        media_type="text/csv; charset=utf-8",
         headers={
-            "Content-Disposition": f"attachment; filename={filename}"
+            "Content-Disposition": f"attachment; filename=\"{filename}\"",
+            "Content-Type": "text/csv; charset=utf-8"
         }
     )
 

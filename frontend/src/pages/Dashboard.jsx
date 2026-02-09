@@ -409,11 +409,12 @@ function Dashboard() {
   // Prepare dialogues for export (exclude messages still streaming)
   const prepareDialoguesForExport = () => {
     return messages
-      .filter(msg => !msg.streaming)
+      .filter(msg => !msg.streaming && msg.answer) // Only include completed messages with answers
       .map(msg => ({
-        question: msg.question,
-        answer: msg.answer,
-        timestamp: new Date(msg.id).toISOString()
+        question: msg.question || '',
+        answer: msg.answer || '',
+        evidence: msg.evidence || null,
+        timestamp: msg.timestamp || new Date(msg.id).toISOString()
       }));
   };
 
@@ -440,16 +441,30 @@ function Dashboard() {
 
   // Handle CSV download
   const handleDownloadCsv = async () => {
-    if (messages.length === 0) return;
+    if (messages.length === 0) {
+      setExportMessage({ type: 'error', text: 'No messages to export' });
+      setTimeout(() => setExportMessage(null), 3000);
+      return;
+    }
+    
+    const dialogues = prepareDialoguesForExport();
+    if (dialogues.length === 0) {
+      setExportMessage({ type: 'error', text: 'No completed messages to export' });
+      setTimeout(() => setExportMessage(null), 3000);
+      return;
+    }
     
     setExportingCsv(true);
     setExportMessage(null);
     
     try {
-      const dialogues = prepareDialoguesForExport();
       const sessionSummary = getSessionSummary();
       
       const blob = await exportApi.downloadCsv(dialogues, sessionSummary);
+      
+      if (!blob || blob.size === 0) {
+        throw new Error('Received empty file');
+      }
       
       // Create download link
       const url = window.URL.createObjectURL(blob);
@@ -463,13 +478,14 @@ function Dashboard() {
       
       setExportMessage({ type: 'success', text: 'CSV downloaded!' });
     } catch (err) {
+      console.error('CSV download error:', err);
       setExportMessage({ 
         type: 'error', 
-        text: err instanceof ApiError ? err.message : 'Download failed'
+        text: err instanceof ApiError ? err.message : `Download failed: ${err.message || 'Unknown error'}`
       });
     } finally {
       setExportingCsv(false);
-      setTimeout(() => setExportMessage(null), 3000);
+      setTimeout(() => setExportMessage(null), 5000);
     }
   };
 
@@ -607,44 +623,44 @@ function Dashboard() {
             </div>
             
             {/* Export Buttons */}
-            {messages.length > 0 && (
-              <div className="export-buttons">
-                <button
-                  className="btn-icon"
-                  onClick={handleDownloadCsv}
-                  disabled={exportingCsv}
-                  title="Download as CSV"
-                >
-                  {exportingCsv ? (
-                    <span className="spinner-small" />
-                  ) : (
-                    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                    </svg>
-                  )}
-                </button>
-                <button
-                  className="btn-icon"
-                  onClick={handleDownloadJson}
-                  disabled={exportingJson}
-                  title="Download as JSON"
-                >
-                  {exportingJson ? (
-                    <span className="spinner-small" />
-                  ) : (
-                    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                    </svg>
-                  )}
-                </button>
-                
-                {exportMessage && (
-                  <span className={`export-message ${exportMessage.type}`}>
-                    {exportMessage.text}
-                  </span>
+            <div className="export-buttons">
+              <button
+                className="btn-icon"
+                onClick={handleDownloadCsv}
+                disabled={exportingCsv || messages.length === 0}
+                title={messages.length === 0 ? "No messages to export" : "Download as CSV"}
+              >
+                {exportingCsv ? (
+                  <span className="spinner-small" />
+                ) : (
+                  <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    {/* CSV icon - table with rows */}
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M3 14h18M3 18h18M5 6h14a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2z" />
+                  </svg>
                 )}
-              </div>
-            )}
+              </button>
+              <button
+                className="btn-icon"
+                onClick={handleDownloadJson}
+                disabled={exportingJson || messages.length === 0}
+                title={messages.length === 0 ? "No messages to export" : "Download as JSON"}
+              >
+                {exportingJson ? (
+                  <span className="spinner-small" />
+                ) : (
+                  <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    {/* JSON icon - code brackets */}
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+                  </svg>
+                )}
+              </button>
+              
+              {exportMessage && (
+                <span className={`export-message ${exportMessage.type}`}>
+                  {exportMessage.text}
+                </span>
+              )}
+            </div>
           </div>
           
           <div className="panel-body qa-panel">
