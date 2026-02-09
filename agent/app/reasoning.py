@@ -4,6 +4,7 @@ from typing import Any
 from collections import Counter
 
 from .models import SessionSummary
+from .spatial_analysis import analyze_session_spatial_relationships
 
 logger = logging.getLogger(__name__)
 
@@ -38,12 +39,16 @@ class ReasoningService:
         # Detect limitations
         limitations = self._detect_limitations(session_objects, layer_counts)
         
+        # Analyze spatial relationships
+        spatial_analysis = analyze_session_spatial_relationships(session_objects)
+        
         return SessionSummary(
             layer_counts=layer_counts,
             plot_boundary_present=plot_boundary_present,
             highways_present=highways_present,
             total_objects=len(session_objects),
-            limitations=limitations
+            limitations=limitations,
+            spatial_analysis=spatial_analysis
         )
     
     def _object_has_geometry(self, obj: dict[str, Any]) -> bool:

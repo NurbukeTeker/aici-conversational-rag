@@ -99,6 +99,22 @@ def invoke_hybrid(
     layer_counts_str = ", ".join(f"{k}={v}" for k, v in layer_counts.items()) if layer_counts else "None"
     limitations = session_summary.get("limitations", [])
     limitations_str = ", ".join(limitations) if limitations else "None"
+    
+    # Format spatial analysis for prompt
+    spatial_analysis = session_summary.get("spatial_analysis")
+    if spatial_analysis:
+        spatial_str_parts = []
+        if spatial_analysis.get("property_highway_analysis"):
+            pha = spatial_analysis["property_highway_analysis"]
+            spatial_str_parts.append(f"Property-Highway: {pha.get('analysis', 'N/A')}")
+        if spatial_analysis.get("available_geometry"):
+            spatial_str_parts.append(f"Layers with geometry: {', '.join(spatial_analysis['available_geometry'])}")
+        if spatial_analysis.get("missing_for_extensions"):
+            spatial_str_parts.append(f"Missing for extensions: {', '.join(spatial_analysis['missing_for_extensions'])}")
+        spatial_analysis_str = "; ".join(spatial_str_parts) if spatial_str_parts else "None"
+    else:
+        spatial_analysis_str = "None"
+    
     chunks_fmt = _format_retrieved_chunks(retrieved_chunks)
     return hybrid_chain.invoke({
         "question": question,
@@ -107,6 +123,7 @@ def invoke_hybrid(
         "plot_boundary_present": session_summary.get("plot_boundary_present", False),
         "highways_present": session_summary.get("highways_present", False),
         "limitations": limitations_str,
+        "spatial_analysis": spatial_analysis_str,
         "retrieved_chunks_formatted": chunks_fmt,
     })
 

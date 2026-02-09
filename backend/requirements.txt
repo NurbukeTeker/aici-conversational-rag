@@ -14,8 +14,7 @@ python-multipart>=0.0.18
 sqlalchemy>=2.0.0
 aiosqlite>=0.20.0
 
-# Excel Export
-openpyxl>=3.1.0
+# CSV Export (built-in csv module, no external dependency needed)
 
 # Testing
 pytest>=8.3.0

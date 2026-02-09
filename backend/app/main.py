@@ -451,6 +451,10 @@ async def update_session_objects(
     # Convert DrawingObject instances to dicts for storage
     objects_list = [obj.model_dump() for obj in data.objects]
     
+    # Normalize geometry formats (points/start-end → GeoJSON coordinates)
+    from .geometry_normalizer import normalize_session_objects
+    objects_list = normalize_session_objects(objects_list)
+    
     # Store objects
     success = session_service.set_objects(current_user.user_id, objects_list)
     
@@ -524,6 +528,10 @@ async def ask_question(
     
     # Get current session objects
     session_objects, _ = session_service.get_objects(current_user.user_id)
+    
+    # Normalize geometry formats before sending to agent (ensures geometry guard compatibility)
+    from .geometry_normalizer import normalize_session_objects
+    session_objects = normalize_session_objects(session_objects)
     
     # Call agent service
     try:
@@ -599,6 +607,9 @@ async def websocket_qa(websocket: WebSocket):
                     continue
 
                 session_objects, _ = session_service.get_objects(token_data.user_id)
+                # Normalize geometry formats before sending to agent
+                from .geometry_normalizer import normalize_session_objects
+                session_objects = normalize_session_objects(session_objects)
                 stream_url = f"{settings.agent_service_url}/answer/stream"
                 async with httpx.AsyncClient(timeout=60.0) as client:
                     async with client.stream(
@@ -671,49 +682,6 @@ async def health_check(
 
 # ============== Export Endpoints ==============
 
-@app.post("/export/excel")
-async def download_dialogue_excel(
-    data: ExportRequest,
-    current_user: Annotated[TokenData, Depends(get_current_user)]
-):
-    """
-    Download Q&A dialogues as Excel file.
-    
-    Returns an Excel file (.xlsx) with all dialogues and evidence.
-    """
-    if not current_user.user_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid user session"
-        )
-    
-    export_service = get_export_service()
-    
-    # Convert dialogues to dict format
-    dialogues = [d.model_dump() for d in data.dialogues]
-    
-    # Generate Excel
-    excel_bytes = export_service.create_dialogue_excel(
-        dialogues=dialogues,
-        username=current_user.username or "user",
-        session_summary=data.session_summary
-    )
-    
-    # Generate filename
-    from datetime import datetime
-    filename = f"AICI_QA_Export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-    
-    logger.info(f"User {current_user.user_id} downloaded Excel export with {len(dialogues)} items")
-    
-    return Response(
-        content=excel_bytes,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={
-            "Content-Disposition": f"attachment; filename={filename}"
-        }
-    )
-
-
 @app.post("/export/json")
 async def download_dialogue_json(
     data: ExportRequest,
@@ -759,6 +727,49 @@ async def download_dialogue_json(
     )
 
 
+@app.post("/export/csv")
+async def download_dialogue_csv(
+    data: ExportRequest,
+    current_user: Annotated[TokenData, Depends(get_current_user)]
+):
+    """
+    Download Q&A dialogues as CSV file.
+    
+    Returns a CSV file with all dialogues and evidence.
+    """
+    if not current_user.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid user session"
+        )
+    
+    export_service = get_export_service()
+    
+    # Convert dialogues to dict format
+    dialogues = [d.model_dump() for d in data.dialogues]
+    
+    # Generate CSV
+    csv_bytes = export_service.create_dialogue_csv(
+        dialogues=dialogues,
+        username=current_user.username or "user",
+        session_summary=data.session_summary
+    )
+    
+    # Generate filename
+    from datetime import datetime
+    filename = f"AICI_QA_Export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    
+    logger.info(f"User {current_user.user_id} downloaded CSV export with {len(dialogues)} items")
+    
+    return Response(
+        content=csv_bytes,
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}"
+        }
+    )
+
+
 @app.get("/")
 async def root():
     """Root endpoint."""
@@ -776,7 +787,7 @@ async def root():
             "/session/objects",
             "/qa",
             "/ws/qa",
-            "/export/excel",
+            "/export/csv",
             "/export/json",
             "/health"
         ],
