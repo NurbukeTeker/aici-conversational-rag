@@ -16,8 +16,24 @@ def analyze_property_highway_relationship(
     - distance_to_highway: float | None
     - analysis: str (human-readable)
     """
-    plot_geom = plot_boundary.get("geometry", {})
-    highway_geom = highway.get("geometry", {})
+    plot_geom = plot_boundary.get("geometry")
+    highway_geom = highway.get("geometry")
+    
+    # Handle None geometry
+    if plot_geom is None or highway_geom is None:
+        return {
+            "fronts_highway": False,
+            "distance_to_highway": None,
+            "analysis": "Cannot determine: missing geometry"
+        }
+    
+    # Ensure geometry is a dict
+    if not isinstance(plot_geom, dict) or not isinstance(highway_geom, dict):
+        return {
+            "fronts_highway": False,
+            "distance_to_highway": None,
+            "analysis": "Cannot determine: invalid geometry format"
+        }
     
     plot_coords = plot_geom.get("coordinates")
     highway_coords = highway_geom.get("coordinates")
@@ -26,7 +42,7 @@ def analyze_property_highway_relationship(
         return {
             "fronts_highway": False,
             "distance_to_highway": None,
-            "analysis": "Cannot determine: missing geometry"
+            "analysis": "Cannot determine: missing coordinates"
         }
     
     # Extract coordinates based on GeoJSON type
@@ -169,22 +185,29 @@ def analyze_session_spatial_relationships(session_objects: list[dict[str, Any]])
     
     for obj in session_objects:
         layer = obj.get("layer", "").lower()
-        geometry = obj.get("geometry", {})
-        coords = geometry.get("coordinates") if isinstance(geometry, dict) else None
+        geometry = obj.get("geometry")
         
-        if coords:
-            result["available_geometry"].append(obj.get("layer", "Unknown"))
+        # Check if geometry exists and has coordinates
+        if geometry is not None and isinstance(geometry, dict):
+            coords = geometry.get("coordinates")
+            if coords:
+                result["available_geometry"].append(obj.get("layer", "Unknown"))
         
         if "plot" in layer or "boundary" in layer:
             plot_boundary = obj
         if "highway" in layer or "road" in layer:
             highway = obj
     
-    # Analyze property-highway relationship if both exist
+    # Analyze property-highway relationship if both exist and have geometry
     if plot_boundary and highway:
-        result["property_highway_analysis"] = analyze_property_highway_relationship(
-            plot_boundary, highway
-        )
+        plot_geom = plot_boundary.get("geometry")
+        highway_geom = highway.get("geometry")
+        # Only analyze if both have valid geometry
+        if (plot_geom is not None and isinstance(plot_geom, dict) and plot_geom.get("coordinates") and
+            highway_geom is not None and isinstance(highway_geom, dict) and highway_geom.get("coordinates")):
+            result["property_highway_analysis"] = analyze_property_highway_relationship(
+                plot_boundary, highway
+            )
     
     # Check what's missing for extension questions
     layers_present = {obj.get("layer", "").lower() for obj in session_objects}
