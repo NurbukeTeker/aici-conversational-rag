@@ -4,6 +4,15 @@
 
 This project implements a **hybrid Retrieval-Augmented Generation (RAG)** system that answers questions by combining **persistent document embeddings** with **session-specific structured drawing objects** provided as JSON. Persistent knowledge is stored in a vector database; ephemeral objects are maintained per user session and injected into each query at runtime. The **Agent is stateless**: it receives question + session JSON on every request and does not store session state.
 
+## 🎥 Demo Walkthrough (Loom)
+
+Click the image below to watch a short walkthrough of the system, including:
+- JSON session handling
+- Hybrid RAG question routing
+- Geometry guard behavior
+- Live answer updates
+
+[![Watch the demo](https://cdn.loom.com/sessions/thumbnails/5518a5df79604adba684b5ccefa017ed-with-play.gif)](https://www.loom.com/share/5518a5df79604adba684b5ccefa017ed)
 ---
 
 ## 2. Architecture Overview
